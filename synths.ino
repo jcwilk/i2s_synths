@@ -1,15 +1,9 @@
-#include <Wire.h>
-#include <SparkFun_WM8960_Arduino_Library.h>
 #include <driver/i2s.h>
 
 // Module configuration
 #define ENABLE_DELAY 1
-
-WM8960 codec;
-
-// I2C pin definitions for ESP32-S3-Zero
-#define I2C_SDA 8
-#define I2C_SCL 9
+#define ENABLE_GATEWAY 1
+#define I2S_IS_SLAVE 0  // Set to 1 for slave mode, 0 for master mode
 
 // I2S pin definitions for ESP32-S3-Zero (GPIO 1-13 only)
 #define I2S_WS 13 // Word Select (Left/Right Clock) - shared
@@ -26,20 +20,10 @@ int16_t txBuffer[BUFFER_LEN];
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("ESP32-S3-Zero WM8960 I2S Audio Processing (GPIO 1-13)");
+  Serial.println("ESP32-S3-Zero I2S Audio Processing (GPIO 1-13)");
 
-  // Initialize I2C with custom pins
-  Wire.begin(I2C_SDA, I2C_SCL);
-  Wire.setClock(100000); // 100kHz for reliable communication
-
-  if (codec.begin() == false) {
-    Serial.println("WM8960 not detected. Check wiring and power.");
-    while (1);
-  }
-  Serial.println("WM8960 connected successfully");
-
-  // Configure WM8960 for I2S operation (NO internal loopback)
-  setupWM8960ForI2S();
+  // Initialize gateway (WM8960 management)
+  gatewaySetup();
 
   // Setup I2S for bidirectional communication
   setupI2S();
@@ -48,7 +32,7 @@ void setup() {
   moduleSetup();
 
   Serial.println("Setup complete. Audio processing active on GPIO 10-13.");
-  Serial.println("Microphone -> ESP32 -> Audio Processing -> ESP32 -> Speakers");
+  Serial.println("Audio Input -> ESP32 -> Audio Processing -> ESP32 -> Audio Output");
 }
 
 void loop() {
@@ -68,91 +52,14 @@ void loop() {
   }
 }
 
-void setupWM8960ForI2S() {
-  // General setup needed
-  codec.enableVREF();
-  codec.enableVMID();
-
-  // Setup signal flow from onboard microphones to ADC
-  codec.enableLMIC();
-  codec.enableRMIC();
-
-  // Connect from INPUT1 to "n" (aka inverting) inputs of PGAs.
-  codec.connectLMN1();
-  codec.connectRMN1();
-
-  // Disable mutes on PGA inputs
-  codec.disableLINMUTE();
-  codec.disableRINMUTE();
-
-  // Set input volumes for microphones
-  codec.setLINVOLDB(12.00); // +12dB gain for microphone
-  codec.setRINVOLDB(12.00); // +12dB gain for microphone
-
-  // Set input boosts to get inputs 1 to the boost mixers
-  codec.setLMICBOOST(WM8960_MIC_BOOST_GAIN_20DB);
-  codec.setRMICBOOST(WM8960_MIC_BOOST_GAIN_20DB);
-
-  // Connect microphone boost to boost mixers
-  codec.connectLMIC2B();
-  codec.connectRMIC2B();
-
-  // Enable boost mixers
-  codec.enableAINL();
-  codec.enableAINR();
-
-  // Disable analog bypass (we want digital processing)
-  codec.disableLB2LO();
-  codec.disableRB2RO();
-
-  // Connect from DAC outputs to output mixer
-  codec.enableLD2LO();
-  codec.enableRD2RO();
-
-  // Set gain stage between booster mixer and output mixer
-  codec.setLB2LOVOL(WM8960_OUTPUT_MIXER_GAIN_NEG_21DB);
-  codec.setRB2ROVOL(WM8960_OUTPUT_MIXER_GAIN_NEG_21DB);
-
-  // Enable output mixers
-  codec.enableLOMIX();
-  codec.enableROMIX();
-
-  // Clock configuration for 44.1kHz
-  codec.enablePLL(); // Needed for class-d amp clock
-  codec.setWL(WM8960_WL_16BIT); // 16-bit samples
-  codec.setPLLPRESCALE(WM8960_PLLPRESCALE_DIV_2);
-  codec.setSMD(WM8960_PLL_MODE_FRACTIONAL);
-  codec.setCLKSEL(WM8960_CLKSEL_PLL);
-  codec.setSYSCLKDIV(WM8960_SYSCLK_DIV_BY_2);
-  codec.setBCLKDIV(4);
-  codec.setDCLKDIV(WM8960_DCLKDIV_16);
-  codec.setPLLN(7);
-  codec.setPLLK(0x86, 0xC2, 0x26); // PLLK=86C226h for 44.1kHz
-
-  // **IMPORTANT: Set WM8960 as I2S SLAVE (ESP32 will be master)**
-  codec.enablePeripheralMode(); // WM8960 receives clocks from ESP32
-
-  // Enable ADCs and DACs
-  codec.enableAdcLeft();
-  codec.enableAdcRight();
-  codec.enableDacLeft();
-  codec.enableDacRight();
-  codec.disableDacMute();
-
-  // **DO NOT enable internal loopback - we want external I2S processing**
-  // codec.enableLoopBack(); // <-- REMOVED
-
-  // Enable Class-D speaker drivers
-  codec.enableSpeakers();
-  codec.setSpeakerVolumeDB(0.00); // Set speaker volume to 0dB
-
-  Serial.println("WM8960 configured as I2S slave");
-}
-
 void setupI2S() {
   // Configure I2S for bidirectional communication (RX + TX)
   const i2s_config_t i2s_config = {
+#if I2S_IS_SLAVE
+    .mode = i2s_mode_t(I2S_MODE_SLAVE | I2S_MODE_RX | I2S_MODE_TX), // Slave mode, both RX and TX
+#else
     .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX), // Master mode, both RX and TX
+#endif
     .sample_rate = SAMPLE_RATE,
     .bits_per_sample = i2s_bits_per_sample_t(16),
     .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT, // Stereo
@@ -189,5 +96,9 @@ void setupI2S() {
     return;
   }
 
-  Serial.println("I2S configured for bidirectional communication on GPIO 10-13");
+#if I2S_IS_SLAVE
+  Serial.println("I2S configured as SLAVE for bidirectional communication on GPIO 10-13");
+#else
+  Serial.println("I2S configured as MASTER for bidirectional communication on GPIO 10-13");
+#endif
 }
