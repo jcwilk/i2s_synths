@@ -1,7 +1,7 @@
 #include <driver/i2s.h>
 
 // Module configuration
-#define ENABLE_DELAY 1
+#define ENABLE_DELAY 0
 #define ENABLE_GATEWAY 1
 #define I2S_IS_SLAVE 0  // Set to 1 for slave mode, 0 for master mode
 
