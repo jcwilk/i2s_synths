@@ -1,7 +1,11 @@
 #include <driver/i2s.h>
 
-// Module configuration
-#define ENABLE_DELAY 0
+// Module selection
+#define MODULE_PASSTHROUGH 0
+#define MODULE_DELAY 1
+#define MODULE_MERGER 2
+#define ACTIVE_MODULE MODULE_MERGER
+
 #define ENABLE_GATEWAY 1
 #define I2S_IS_SLAVE 0  // Set to 1 for slave mode, 0 for master mode
 
@@ -14,9 +18,30 @@
 #define I2S_PORT I2S_NUM_0
 #define SAMPLE_RATE 44100
 #define BUFFER_LEN 128
+#define I2S_DMA_BUF_COUNT 4
+#define I2S_BITS_PER_SAMPLE I2S_BITS_PER_SAMPLE_16BIT
+#define I2S_CHANNEL_FORMAT I2S_CHANNEL_FMT_RIGHT_LEFT
+#define I2S_COMM_FORMAT I2S_COMM_FORMAT_STAND_I2S
+#define I2S_INTR_ALLOC_FLAGS 0
+#define I2S_USE_APLL false
+#define I2S_TX_DESC_AUTO_CLEAR false
+#define I2S_FIXED_MCLK 0
+#define I2S_MCLK_MULTIPLE I2S_MCLK_MULTIPLE_512
+#define I2S_BITS_PER_CHAN I2S_BITS_PER_CHAN_DEFAULT
 
 int16_t rxBuffer[BUFFER_LEN];
 int16_t txBuffer[BUFFER_LEN];
+
+#if ACTIVE_MODULE == MODULE_PASSTHROUGH
+void moduleSetup() {
+  Serial.println("Passthrough module active - was this a mistake?");
+}
+void moduleLoop(int16_t* inputBuffer, int16_t* outputBuffer, int sampleCount) {
+  memcpy(outputBuffer, inputBuffer, sampleCount * sizeof(int16_t));
+}
+#endif
+
+unsigned long startup_time = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -33,6 +58,7 @@ void setup() {
 
   Serial.println("Setup complete. Audio processing active on GPIO 10-13.");
   Serial.println("Audio Input -> ESP32 -> Audio Processing -> ESP32 -> Audio Output");
+  startup_time = millis();
 }
 
 void loop() {
@@ -43,8 +69,12 @@ void loop() {
   if (result == ESP_OK && bytesRead > 0) {
     int samplesRead = bytesRead / sizeof(int16_t);
 
-    // Process audio through module
-    moduleLoop(rxBuffer, txBuffer, samplesRead);
+    if(startup_time == 0 || millis() - startup_time > 1000) {
+      // Process audio through module
+      moduleLoop(rxBuffer, txBuffer, samplesRead);
+    } else {
+      memset(txBuffer, 0, sizeof(txBuffer));
+    }
 
     // Send processed audio data back to WM8960 DAC via I2S
     size_t bytesWritten = 0;
@@ -61,17 +91,17 @@ void setupI2S() {
     .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX), // Master mode, both RX and TX
 #endif
     .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = i2s_bits_per_sample_t(16),
-    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT, // Stereo
-    .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
-    .intr_alloc_flags = 0,
-    .dma_buf_count = 4, // Small buffers for low latency
+    .bits_per_sample = I2S_BITS_PER_SAMPLE,
+    .channel_format = I2S_CHANNEL_FORMAT,
+    .communication_format = I2S_COMM_FORMAT,
+    .intr_alloc_flags = I2S_INTR_ALLOC_FLAGS,
+    .dma_buf_count = I2S_DMA_BUF_COUNT,
     .dma_buf_len = BUFFER_LEN,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0,
-    .mclk_multiple = i2s_mclk_multiple_t(I2S_MCLK_MULTIPLE_512),
-    .bits_per_chan = i2s_bits_per_chan_t(I2S_BITS_PER_CHAN_DEFAULT)
+    .use_apll = I2S_USE_APLL,
+    .tx_desc_auto_clear = I2S_TX_DESC_AUTO_CLEAR,
+    .fixed_mclk = I2S_FIXED_MCLK,
+    .mclk_multiple = I2S_MCLK_MULTIPLE,
+    .bits_per_chan = I2S_BITS_PER_CHAN
   };
 
   // Install I2S driver

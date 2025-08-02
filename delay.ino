@@ -1,6 +1,6 @@
 // Delay module for audio processing
 
-#if ENABLE_DELAY
+#if ACTIVE_MODULE == MODULE_DELAY
 // Delay buffer configuration
 #define DELAY_SAMPLES (SAMPLE_RATE * 1) // 1 second delay at 44.1kHz
 
@@ -28,16 +28,4 @@ void moduleLoop(int16_t* inputBuffer, int16_t* outputBuffer, int sampleCount) {
     delayIndex = (delayIndex + 1) % (DELAY_SAMPLES * 2);
   }
 }
-
-#else
-// Module disabled - provide passthrough functions
-void moduleSetup() {
-  // No initialization needed for passthrough
-}
-
-void moduleLoop(int16_t* inputBuffer, int16_t* outputBuffer, int sampleCount) {
-  // Direct passthrough - copy input to output
-  memcpy(outputBuffer, inputBuffer, sampleCount * sizeof(int16_t));
-}
-
 #endif
