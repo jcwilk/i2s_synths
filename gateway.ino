@@ -7,8 +7,8 @@
 WM8960 codec;
 
 // I2C pin definitions for ESP32-S3-Zero
-#define I2C_SDA 8
-#define I2C_SCL 9
+#define I2C_SDA 5
+#define I2C_SCL 6
 
 void gatewaySetup() {
   // Initialize I2C with custom pins
@@ -16,8 +16,11 @@ void gatewaySetup() {
   Wire.setClock(100000); // 100kHz for reliable communication
 
   if (codec.begin() == false) {
-    Serial.println("WM8960 not detected. Check wiring and power.");
-    while (1);
+    // TODO: This occurs very frequently and randomly, there must be some race condition?
+    reportError("WM8960 not detected. Check wiring and power.");
+    while (1) {
+      delay(10);
+    }
   }
   Serial.println("WM8960 connected successfully");
 
