@@ -49,10 +49,9 @@ void moduleSetup() {
 
 void moduleLoop(int16_t* inputBuffer,
                 int16_t* outputBuffer,
-                int sampleCount,
                 int16_t* inputBuffer2,
                 int16_t* outputBuffer2,
-                int sampleCount2) {
+                int samplesLength) {
 
   // Read both potentiometers independently with the same smoothing and dead zones
   float primaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, emaPrimary);
@@ -60,18 +59,14 @@ void moduleLoop(int16_t* inputBuffer,
   
   //Serial.println("Mixing ratio: " + String(mix));
 
-  // Simple forwarding for secondary by default (up to available samples)
-  for (int i = 0; i < sampleCount2; i++) {
-    outputBuffer2[i] = inputBuffer2[i];
+  // Simple forwarding for secondary by default
+  if (samplesLength > 0) {
+    memcpy(outputBuffer2, inputBuffer2, samplesLength * sizeof(int16_t));
   }
 
-  for (int i = 0; i < sampleCount; i++) {
+  for (int i = 0; i < samplesLength; i++) {
     int32_t primarySample = (int32_t)(inputBuffer[i] * primaryCoeff);
-    int32_t secondarySample = 0;
-
-    if (i < sampleCount2) {
-      secondarySample = (int32_t)(inputBuffer2[i] * secondaryCoeff);
-    }
+    int32_t secondarySample = (int32_t)(inputBuffer2[i] * secondaryCoeff);
     
     int32_t merged_sample = primarySample + secondarySample;
 

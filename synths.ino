@@ -8,7 +8,10 @@
 #define ACTIVE_MODULE MODULE_MERGER
 
 #define ENABLE_GATEWAY 1
-#define I2S_IS_SLAVE 0  // Set to 1 for slave mode, 0 for master mode
+// Interface role policy:
+// - Interface 1 (I2S0) is ALWAYS master
+// - Interface 2 (I2S1) is slave, EXCEPT when ENABLE_GATEWAY == 1, then it is master too
+// The old I2S_IS_SLAVE toggle is no longer used for I2S0
 
 // I2S pin definitions for ESP32-S3-Zero (GPIO 1-13 only)
 #define I2S_WS 13 // Word Select (Left/Right Clock) - shared
@@ -47,6 +50,13 @@ int16_t txBuffer[BUFFER_LEN];
 int16_t rxBuffer2[BUFFER_LEN];
 int16_t txBuffer2[BUFFER_LEN];
 
+// Small FIFOs to accumulate and synchronize reads across both interfaces
+static const int ACCUM_CAPACITY = BUFFER_LEN * 4;
+static int16_t inputAccum1[ACCUM_CAPACITY];
+static int inputAccumCount1 = 0;
+static int16_t inputAccum2[ACCUM_CAPACITY];
+static int inputAccumCount2 = 0;
+
 // Error indication via onboard NeoPixel (21): blocks and blinks red at 1 Hz
 #define STATUS_NEOPIXEL_PIN 21
 #define STATUS_NEOPIXEL_BRIGHTNESS 25  // ~1/10 of full brightness
@@ -81,15 +91,15 @@ void moduleSetup() {
 }
 void moduleLoop(int16_t* inputBuffer,
                 int16_t* outputBuffer,
-                int sampleCount,
                 int16_t* inputBuffer2,
                 int16_t* outputBuffer2,
-                int sampleCount2) {
-  if (sampleCount > 0) {
-    memcpy(outputBuffer, inputBuffer, sampleCount * sizeof(int16_t));
+                int samplesLength) {
+  // Pure passthrough per interface (1->1, 2->2). Cross-routing is handled in loop().
+  if (outputBuffer && inputBuffer && samplesLength > 0) {
+    memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
   }
-  if (sampleCount2 > 0) {
-    memcpy(outputBuffer2, inputBuffer2, sampleCount2 * sizeof(int16_t));
+  if (outputBuffer2 && inputBuffer2 && samplesLength > 0) {
+    memcpy(outputBuffer2, inputBuffer2, samplesLength * sizeof(int16_t));
   }
 }
 #endif
@@ -102,13 +112,13 @@ void moduleLoop(int16_t* inputBuffer,
 #define DEBUG_TONE_FREQ_HZ 100.0f
 #endif
 #ifndef DEBUG_TONE_AMPLITUDE
-#define DEBUG_TONE_AMPLITUDE 10000.0f
+#define DEBUG_TONE_AMPLITUDE 1000.0f
 #endif
 
 // Per-interface toggle: 1 = generate tone, 0 = passthrough input
 // Comment out or set to 0 to passthrough that interface instead of generating tone
 #ifndef DEBUG_TONE_PRIMARY
-#define DEBUG_TONE_PRIMARY 1
+#define DEBUG_TONE_PRIMARY 0
 #endif
 #ifndef DEBUG_TONE_SECONDARY
 #define DEBUG_TONE_SECONDARY 1
@@ -142,35 +152,36 @@ void moduleSetup() {
 }
 void moduleLoop(int16_t* inputBuffer,
                 int16_t* outputBuffer,
-                int sampleCount,
                 int16_t* inputBuffer2,
                 int16_t* outputBuffer2,
-                int sampleCount2) {
+                int samplesLength) {
   const float phaseIncrement = 2.0f * PI * DEBUG_TONE_FREQ_HZ / (float)SAMPLE_RATE;
 
   // Primary interface
-  if (sampleCount > 0 && outputBuffer) {
+  if (samplesLength > 0 && outputBuffer) {
   #if DEBUG_TONE_PRIMARY
-    fillSine(outputBuffer, sampleCount, debugTonePhasePrimary, phaseIncrement, DEBUG_TONE_AMPLITUDE);
+    fillSine(outputBuffer, samplesLength, debugTonePhasePrimary, phaseIncrement, DEBUG_TONE_AMPLITUDE);
   #else
     if (inputBuffer) {
-      memcpy(outputBuffer, inputBuffer, sampleCount * sizeof(int16_t));
+      memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
     }
   #endif
   }
 
   // Secondary interface
-  if (sampleCount2 > 0 && outputBuffer2) {
+  if (samplesLength > 0 && outputBuffer2) {
   #if DEBUG_TONE_SECONDARY
-    fillSine(outputBuffer2, sampleCount2, debugTonePhaseSecondary, phaseIncrement, DEBUG_TONE_AMPLITUDE);
+    fillSine(outputBuffer2, samplesLength, debugTonePhaseSecondary, phaseIncrement, DEBUG_TONE_AMPLITUDE);
   #else
     if (inputBuffer2) {
-      memcpy(outputBuffer2, inputBuffer2, sampleCount2 * sizeof(int16_t));
+      memcpy(outputBuffer2, inputBuffer2, samplesLength * sizeof(int16_t));
     }
   #endif
   }
 }
 #endif
+
+// All modules now use a single samplesLength across both interfaces.
 
 unsigned long startup_time = 0;
 
@@ -198,47 +209,82 @@ void setup() {
 }
 
 void loop() {
-  // Normal audio loop; reportError() will lock and blink if called
-  // Read audio data from WM8960 ADC via I2S
-  size_t bytesRead = 0;
-  esp_err_t result = i2s_read(I2S_PORT, rxBuffer, BUFFER_LEN * sizeof(int16_t), &bytesRead, portMAX_DELAY);
+  // Accumulate non-blocking reads from both interfaces, then process equal-length chunks
+  int16_t tempIn1[BUFFER_LEN];
+  int16_t tempIn2[BUFFER_LEN];
+
+  // Read from primary I2S (non-blocking)
+  size_t bytesRead1 = 0;
+  i2s_read(I2S_PORT, tempIn1, BUFFER_LEN * sizeof(int16_t), &bytesRead1, 0);
+  int samples1 = bytesRead1 / sizeof(int16_t);
+  if (samples1 > 0 && inputAccumCount1 < ACCUM_CAPACITY) {
+    int space1 = ACCUM_CAPACITY - inputAccumCount1;
+    int toCopy1 = min(samples1, space1);
+    if (toCopy1 > 0) {
+      memcpy(inputAccum1 + inputAccumCount1, tempIn1, toCopy1 * sizeof(int16_t));
+      inputAccumCount1 += toCopy1;
+    }
+  }
 
   // Read from secondary I2S (non-blocking)
   size_t bytesRead2 = 0;
-  i2s_read(I2S_PORT_1, rxBuffer2, BUFFER_LEN * sizeof(int16_t), &bytesRead2, 0);
-
-  if (result == ESP_OK && bytesRead > 0) {
-    int samplesRead = bytesRead / sizeof(int16_t);
-    int samplesRead2 = bytesRead2 / sizeof(int16_t);
-
-    if(startup_time == 0 || millis() - startup_time > 1000) {
-      // Process audio through module (primary and secondary)
-      moduleLoop(rxBuffer, txBuffer, samplesRead,
-                 rxBuffer2, txBuffer2, samplesRead2);
-    } else {
-      memset(txBuffer, 0, sizeof(txBuffer));
-    }
-
-    // Send processed audio data back to WM8960 DAC via I2S
-    size_t bytesWritten = 0;
-    i2s_write(I2S_PORT, txBuffer, samplesRead * sizeof(int16_t), &bytesWritten, portMAX_DELAY);
-
-    // Send secondary processed audio if any was read
-    if (samplesRead2 > 0) {
-      size_t bytesWritten2 = 0;
-      i2s_write(I2S_PORT_1, txBuffer2, samplesRead2 * sizeof(int16_t), &bytesWritten2, 0);
+  i2s_read(I2S_PORT_1, tempIn2, BUFFER_LEN * sizeof(int16_t), &bytesRead2, 0);
+  int samples2 = bytesRead2 / sizeof(int16_t);
+  if (samples2 > 0 && inputAccumCount2 < ACCUM_CAPACITY) {
+    int space2 = ACCUM_CAPACITY - inputAccumCount2;
+    int toCopy2 = min(samples2, space2);
+    if (toCopy2 > 0) {
+      memcpy(inputAccum2 + inputAccumCount2, tempIn2, toCopy2 * sizeof(int16_t));
+      inputAccumCount2 += toCopy2;
     }
   }
+
+  // During startup mute window, do not process; keep outputs silent and clear accumulators
+  if (!(startup_time == 0 || millis() - startup_time > 1000)) {
+    inputAccumCount1 = 0;
+    inputAccumCount2 = 0;
+    return;
+  }
+
+  // Determine unified samplesLength that both interfaces can supply
+  int samplesLength = min(inputAccumCount1, inputAccumCount2);
+  if (samplesLength <= 0) {
+    return; // wait for both to have data
+  }
+  if (samplesLength > BUFFER_LEN) {
+    samplesLength = BUFFER_LEN;
+  }
+
+  // Prepare equal-length inputs
+  memcpy(rxBuffer, inputAccum1, samplesLength * sizeof(int16_t));
+  memcpy(rxBuffer2, inputAccum2, samplesLength * sizeof(int16_t));
+
+  // Process through module (1->1 and 2->2) with a single unified length
+  moduleLoop(rxBuffer, txBuffer, rxBuffer2, txBuffer2, samplesLength);
+
+  // Cross-route at write stage using the same samplesLength for both
+  size_t bytesWrittenA = 0;
+  i2s_write(I2S_PORT_1, txBuffer, samplesLength * sizeof(int16_t), &bytesWrittenA, 0);
+
+  size_t bytesWrittenB = 0;
+  i2s_write(I2S_PORT, txBuffer2, samplesLength * sizeof(int16_t), &bytesWrittenB, portMAX_DELAY);
+
+  // Consume from accumulators
+  if (inputAccumCount1 - samplesLength > 0) {
+    memmove(inputAccum1, inputAccum1 + samplesLength, (inputAccumCount1 - samplesLength) * sizeof(int16_t));
+  }
+  inputAccumCount1 -= samplesLength;
+
+  if (inputAccumCount2 - samplesLength > 0) {
+    memmove(inputAccum2, inputAccum2 + samplesLength, (inputAccumCount2 - samplesLength) * sizeof(int16_t));
+  }
+  inputAccumCount2 -= samplesLength;
 }
 
 void setupI2S() {
   // Configure I2S for bidirectional communication (RX + TX)
   const i2s_config_t i2s_config = {
-#if I2S_IS_SLAVE
-    .mode = i2s_mode_t(I2S_MODE_SLAVE | I2S_MODE_RX | I2S_MODE_TX), // Slave mode, both RX and TX
-#else
-    .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX), // Master mode, both RX and TX
-#endif
+    .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX), // Interface 1 ALWAYS master
     .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE,
     .channel_format = I2S_CHANNEL_FORMAT,
@@ -275,17 +321,17 @@ void setupI2S() {
     return;
   }
 
-#if I2S_IS_SLAVE
-  Serial.println("I2S configured as SLAVE for bidirectional communication on GPIO 10-13");
-#else
   Serial.println("I2S configured as MASTER for bidirectional communication on GPIO 10-13");
-#endif
 }
 
 void setupI2S1() {
   // Configure I2S1 as SLAVE for RX + TX
   const i2s_config_t i2s_config = {
-    .mode = i2s_mode_t(I2S_MODE_SLAVE | I2S_MODE_RX | I2S_MODE_TX),
+  #if ENABLE_GATEWAY
+    .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX), // With gateway, Interface 2 is MASTER
+  #else
+    .mode = i2s_mode_t(I2S_MODE_SLAVE | I2S_MODE_RX | I2S_MODE_TX), // Otherwise, Interface 2 is SLAVE
+  #endif
     .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE,
     .channel_format = I2S_CHANNEL_FORMAT,
@@ -320,6 +366,11 @@ void setupI2S1() {
     return;
   }
 
+  #if ENABLE_GATEWAY
+  Serial.printf("I2S1 configured as MASTER RX+TX: BCK=%d, WS=%d, SD_OUT=%d, SD_IN=%d\n",
+                I2S1_SCK, I2S1_WS, I2S1_SD_OUT, I2S1_SD_IN);
+  #else
   Serial.printf("I2S1 configured as SLAVE RX+TX: BCK=%d, WS=%d, SD_OUT=%d, SD_IN=%d\n",
                 I2S1_SCK, I2S1_WS, I2S1_SD_OUT, I2S1_SD_IN);
+  #endif
 }

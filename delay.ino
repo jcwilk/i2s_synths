@@ -16,17 +16,16 @@ void moduleSetup() {
 
 void moduleLoop(int16_t* inputBuffer,
                 int16_t* outputBuffer,
-                int sampleCount,
                 int16_t* inputBuffer2,
                 int16_t* outputBuffer2,
-                int sampleCount2) {
+                int samplesLength) {
   // Forward secondary input to secondary output unchanged
-  if (sampleCount2 > 0) {
-    memcpy(outputBuffer2, inputBuffer2, sampleCount2 * sizeof(int16_t));
+  if (samplesLength > 0) {
+    memcpy(outputBuffer2, inputBuffer2, samplesLength * sizeof(int16_t));
   }
 
   // Process primary samples through the delay buffer
-  for (int i = 0; i < sampleCount; i++) {
+  for (int i = 0; i < samplesLength; i++) {
     // Store current input sample in delay buffer
     delayBuffer[delayIndex] = inputBuffer[i];
 
