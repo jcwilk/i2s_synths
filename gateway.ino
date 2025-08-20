@@ -10,17 +10,105 @@ WM8960 codec;
 #define I2C_SDA 5
 #define I2C_SCL 6
 
+// WM8960 I2C addresses (depends on board's CSB strap)
+#ifndef WM8960_I2C_ADDR_PRIMARY
+#define WM8960_I2C_ADDR_PRIMARY 0x1A
+#endif
+#ifndef WM8960_I2C_ADDR_SECONDARY
+#define WM8960_I2C_ADDR_SECONDARY 0x1B
+#endif
+
+// Optional reset pin for the codec (set this to the pin wired to WM8960 RESET, or leave -1 if not wired)
+#ifndef WM8960_RESET_PIN
+#define WM8960_RESET_PIN -1
+#endif
+
+static void i2cScan() {
+  Serial.println("I2C scan start...");
+  uint8_t count = 0;
+  for (uint8_t address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    uint8_t error = Wire.endTransmission();
+    if (error == 0) {
+      Serial.print(" - Found device at 0x");
+      if (address < 16) Serial.print('0');
+      Serial.println(address, HEX);
+      count++;
+    }
+  }
+  if (count == 0) {
+    Serial.println(" - No I2C devices found");
+  } else {
+    Serial.printf(" - Total devices: %u\n", count);
+  }
+}
+
+static void resetCodecIfPossible() {
+  if (WM8960_RESET_PIN >= 0) {
+    pinMode(WM8960_RESET_PIN, OUTPUT);
+    digitalWrite(WM8960_RESET_PIN, LOW);
+    delay(5);
+    digitalWrite(WM8960_RESET_PIN, HIGH);
+    delay(5);
+  }
+}
+
+static bool i2cDevicePresent(uint8_t address) {
+  Wire.beginTransmission(address);
+  return (Wire.endTransmission() == 0);
+}
+
+static bool tryCodecBegin() {
+  Serial.println("Attempting WM8960.begin() at default address (0x1A)...");
+  return codec.begin(Wire);
+}
+
+static bool initCodecWithRetries() {
+  const uint8_t maxAttempts = 3;
+  for (uint8_t attempt = 1; attempt <= maxAttempts; attempt++) {
+    resetCodecIfPossible();
+    delay(10);
+    if (tryCodecBegin()) {
+      Serial.printf("WM8960 init succeeded on attempt %u\n", attempt);
+      return true;
+    }
+    Serial.printf("WM8960 init failed (attempt %u/%u). Retrying...\n", attempt, maxAttempts);
+    delay(50);
+  }
+  return false;
+}
+
 void gatewaySetup() {
   // Initialize I2C with custom pins
+  // Enable weak pull-ups to improve signal integrity if external pull-ups are marginal.
+  // External 2.2k-4.7k pull-ups are still recommended for robust I2C.
+  pinMode(I2C_SDA, INPUT_PULLUP);
+  pinMode(I2C_SCL, INPUT_PULLUP);
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setClock(100000); // 100kHz for reliable communication
+  Wire.setTimeOut(50);
 
-  if (codec.begin() == false) {
-    // TODO: This occurs very frequently and randomly, there must be some race condition?
-    reportError("WM8960 not detected. Check wiring and power.");
-    while (1) {
-      delay(10);
+  // Provide the codec a brief power-up window before configuration
+  delay(20);
+
+  // Quick bus scan to aid debugging
+  i2cScan();
+
+  const bool has1A = i2cDevicePresent(WM8960_I2C_ADDR_PRIMARY);
+  const bool has1B = i2cDevicePresent(WM8960_I2C_ADDR_SECONDARY);
+
+  if (!has1A) {
+    if (has1B) {
+      Serial.println("Detected WM8960 at 0x1B, but library default is 0x1A.");
+      Serial.println("Recompile with '#define WM8960_ADDR 0x1B' BEFORE including SparkFun_WM8960_Arduino_Library.h, or modify the library address.");
+      reportError("WM8960 appears at 0x1B. Library is fixed to 0x1A.");
+    } else {
+      reportError("WM8960 not found on I2C (no 0x1A/0x1B). Check wiring and power.");
     }
+  }
+
+  if (!initCodecWithRetries()) {
+    reportError("WM8960 not detected after retries. Check wiring, reset timing, and pull-ups.");
   }
   Serial.println("WM8960 connected successfully");
 

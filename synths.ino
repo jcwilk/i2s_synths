@@ -4,6 +4,7 @@
 #define MODULE_PASSTHROUGH 0
 #define MODULE_DELAY 1
 #define MODULE_MERGER 2
+#define MODULE_DEBUG_TONE 3
 #define ACTIVE_MODULE MODULE_MERGER
 
 #define ENABLE_GATEWAY 1
@@ -23,6 +24,10 @@
 #define I2S1_SD_OUT 4
 #define I2S1_SCK 8
 #define I2S_PORT_1 I2S_NUM_1
+
+// Shared potentiometer pin assignments (available to all modules)
+#define POT_PIN_PRIMARY 1
+#define POT_PIN_SECONDARY 2
 
 #define SAMPLE_RATE 44100
 #define BUFFER_LEN 128
@@ -85,6 +90,84 @@ void moduleLoop(int16_t* inputBuffer,
   }
   if (sampleCount2 > 0) {
     memcpy(outputBuffer2, inputBuffer2, sampleCount2 * sizeof(int16_t));
+  }
+}
+#endif
+
+#if ACTIVE_MODULE == MODULE_DEBUG_TONE
+// Simple 100 Hz sine generator for debugging
+// --- Debug Tone Configuration ---
+// Frequency and amplitude
+#ifndef DEBUG_TONE_FREQ_HZ
+#define DEBUG_TONE_FREQ_HZ 100.0f
+#endif
+#ifndef DEBUG_TONE_AMPLITUDE
+#define DEBUG_TONE_AMPLITUDE 10000.0f
+#endif
+
+// Per-interface toggle: 1 = generate tone, 0 = passthrough input
+// Comment out or set to 0 to passthrough that interface instead of generating tone
+#ifndef DEBUG_TONE_PRIMARY
+#define DEBUG_TONE_PRIMARY 1
+#endif
+#ifndef DEBUG_TONE_SECONDARY
+#define DEBUG_TONE_SECONDARY 1
+#endif
+
+static float debugTonePhasePrimary = 0.0f;
+static float debugTonePhaseSecondary = 0.0f;
+
+static inline void fillSine(int16_t* outputBuffer,
+                            int sampleCount,
+                            float& phase,
+                            const float phaseIncrement,
+                            const float amplitude) {
+  for (int i = 0; i < sampleCount; i++) {
+    float sample = sinf(phase) * amplitude;
+    int32_t s = (int32_t)sample;
+    if (s > 32767) s = 32767;
+    if (s < -32768) s = -32768;
+    outputBuffer[i] = (int16_t)s;
+
+    phase += phaseIncrement;
+    if (phase >= 2.0f * PI) {
+      phase -= 2.0f * PI;
+    }
+  }
+}
+void moduleSetup() {
+  Serial.println("Debug tone module active (sine generator)");
+  debugTonePhasePrimary = 0.0f;
+  debugTonePhaseSecondary = 0.0f;
+}
+void moduleLoop(int16_t* inputBuffer,
+                int16_t* outputBuffer,
+                int sampleCount,
+                int16_t* inputBuffer2,
+                int16_t* outputBuffer2,
+                int sampleCount2) {
+  const float phaseIncrement = 2.0f * PI * DEBUG_TONE_FREQ_HZ / (float)SAMPLE_RATE;
+
+  // Primary interface
+  if (sampleCount > 0 && outputBuffer) {
+  #if DEBUG_TONE_PRIMARY
+    fillSine(outputBuffer, sampleCount, debugTonePhasePrimary, phaseIncrement, DEBUG_TONE_AMPLITUDE);
+  #else
+    if (inputBuffer) {
+      memcpy(outputBuffer, inputBuffer, sampleCount * sizeof(int16_t));
+    }
+  #endif
+  }
+
+  // Secondary interface
+  if (sampleCount2 > 0 && outputBuffer2) {
+  #if DEBUG_TONE_SECONDARY
+    fillSine(outputBuffer2, sampleCount2, debugTonePhaseSecondary, phaseIncrement, DEBUG_TONE_AMPLITUDE);
+  #else
+    if (inputBuffer2) {
+      memcpy(outputBuffer2, inputBuffer2, sampleCount2 * sizeof(int16_t));
+    }
+  #endif
   }
 }
 #endif

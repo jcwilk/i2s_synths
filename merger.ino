@@ -9,7 +9,7 @@
 // I2S1 is fully configured in synths.ino; no pin config here
 
 // --- Potentiometer Configuration ---
-#define POT_PIN 2
+// Pins are defined globally in synths.ino so all modules share the same assignments
 #define ADC_MAX 4095
 #define EMA_ALPHA 0.1f // Exponential Moving Average alpha (smoothing factor)
 #define DEAD_ZONE_LOW 0.02f // 2% dead zone
@@ -17,11 +17,26 @@
 
 // Compressor and Potentiometer state
 float currentScaleRatio = 1.0f;
-float smoothedMix = 0.0f;
+float emaPrimary = 0.0f;
+float emaSecondary = 0.0f;
 // No local rx buffer; secondary buffers are managed by synths.ino
 
 
 // No I2S1 setup here; handled in synths.ino
+
+static float readPotWithSmoothingAndDeadZone(int pin, float& emaState) {
+  float raw = (float)analogRead(pin) / ADC_MAX;
+  emaState = (EMA_ALPHA * raw) + ((1.0f - EMA_ALPHA) * emaState);
+  Serial.println("Pin" + String(pin) + " Pot value: " + String(raw)+ " EMA: " + String(emaState));
+
+  if (emaState < DEAD_ZONE_LOW) {
+    return 0.0f;
+  }
+  if (emaState > DEAD_ZONE_HIGH) {
+    return 1.0f;
+  }
+  return (emaState - DEAD_ZONE_LOW) / (DEAD_ZONE_HIGH - DEAD_ZONE_LOW);
+}
 
 void moduleSetup() {
   // I2S1 already initialized in synths.ino
@@ -39,34 +54,9 @@ void moduleLoop(int16_t* inputBuffer,
                 int16_t* outputBuffer2,
                 int sampleCount2) {
 
-  // Read raw potentiometer value
-  float rawMix = (float)analogRead(POT_PIN) / ADC_MAX;
-  
-  // Apply Exponential Moving Average
-  smoothedMix = (EMA_ALPHA * rawMix) + ((1.0f - EMA_ALPHA) * smoothedMix);
-
-  // Apply dead zones and rescale
-  float mix;
-  if (smoothedMix < DEAD_ZONE_LOW) {
-    mix = 0.0f;
-  } else if (smoothedMix > DEAD_ZONE_HIGH) {
-    mix = 1.0f;
-  } else {
-    // Rescale the value from the dead zone to the full 0-1 range
-    mix = (smoothedMix - DEAD_ZONE_LOW) / (DEAD_ZONE_HIGH - DEAD_ZONE_LOW);
-  }
-
-  // Calculate mix coefficients based on pot position
-  float primaryCoeff, secondaryCoeff;
-  if (mix < 0.5f) {
-    // 50% to 0% pot: Primary is 100%, Secondary fades out
-    primaryCoeff = mix * 2.0f;
-    secondaryCoeff = 0.0f;
-  } else {
-    // 50% to 100% pot: Secondary is 100%, Primary fades out
-    primaryCoeff = 2.0f - 2.0f * mix;
-    secondaryCoeff = 2.0f * mix - 1.0f;
-  }
+  // Read both potentiometers independently with the same smoothing and dead zones
+  float primaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, emaPrimary);
+  float secondaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, emaSecondary);
   
   //Serial.println("Mixing ratio: " + String(mix));
 
