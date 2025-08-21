@@ -104,6 +104,25 @@ static unsigned long accumulatedDeltaMs = 0;
 static unsigned long baseLoopMs = 0;
 static bool startup_active = true;
 
+#define ADC_MAX 4095
+#define EMA_ALPHA 0.05f // Exponential Moving Average alpha (smoothing factor)
+#define DEAD_ZONE_LOW 0.02f // 2% dead zone
+#define DEAD_ZONE_HIGH 0.98f // 98% dead zone
+
+static float readPotWithSmoothingAndDeadZone(int pin, float& emaState) {
+  float raw = 1.0f - ((float)analogRead(pin) / ADC_MAX); // invert the pot value
+  emaState = (EMA_ALPHA * raw) + ((1.0f - EMA_ALPHA) * emaState);
+  Serial.println("Pin" + String(pin) + " Pot value: " + String(raw)+ " EMA: " + String(emaState));
+
+  if (emaState < DEAD_ZONE_LOW) {
+    return 0.0f;
+  }
+  if (emaState > DEAD_ZONE_HIGH) {
+    return 1.0f;
+  }
+  return (emaState - DEAD_ZONE_LOW) / (DEAD_ZONE_HIGH - DEAD_ZONE_LOW);
+}
+
 void setup() {
   neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
 
