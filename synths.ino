@@ -32,6 +32,8 @@
 #define POT_PIN_PRIMARY 1
 #define POT_PIN_SECONDARY 2
 
+#define STARTUP_TIME_MS 1000
+
 #define SAMPLE_RATE 44100
 #define BUFFER_LEN 128
 #define I2S_DMA_BUF_COUNT 4
@@ -45,38 +47,16 @@
 #define I2S_MCLK_MULTIPLE I2S_MCLK_MULTIPLE_512
 #define I2S_BITS_PER_CHAN I2S_BITS_PER_CHAN_DEFAULT
 
+// Timed color effect with optional fade behavior
+#define NEOPIXEL_MODE_HOLD 0       // stay at full color for duration, then off
+#define NEOPIXEL_MODE_LINEAR 1     // fade linearly to off over duration
+#define NEOPIXEL_MODE_QUADRATIC 2  // fade quadratically to off over duration
+
 int16_t rxBufferDownstream[BUFFER_LEN];   // input from I2SU → to I2SD
 int16_t txBufferDownstream[BUFFER_LEN];
 int16_t rxBufferUpstream[BUFFER_LEN];     // input from I2SD → to I2SU
 int16_t txBufferUpstream[BUFFER_LEN];
 
-// Error indication via onboard NeoPixel (21): blocks and blinks red at 1 Hz
-#define STATUS_NEOPIXEL_PIN 21
-#define STATUS_NEOPIXEL_BRIGHTNESS 25  // ~1/10 of full brightness
-
-// Many ESP32 boards wire WS2812 as GRB. Provide a helper to avoid channel confusion.
-static inline void setNeoPixelColor(uint8_t r, uint8_t g, uint8_t b) {
-  // Map RGB -> GRB for neopixelWrite
-  neopixelWrite(STATUS_NEOPIXEL_PIN, g, r, b);
-}
-void reportError(const char* message) {
-  Serial.printf("ERROR: %s\n", message);
-  bool ledOn = false;
-  unsigned long lastToggleMs = 0;
-  for (;;) {
-    unsigned long now = millis();
-    if (now - lastToggleMs >= 500) { // toggle every 500ms -> 1 Hz blink
-      lastToggleMs = now;
-      ledOn = !ledOn;
-      if (ledOn) {
-        setNeoPixelColor(STATUS_NEOPIXEL_BRIGHTNESS, 0, 0); // dim red
-      } else {
-        setNeoPixelColor(0, 0, 0); // off
-      }
-    }
-    delay(10);
-  }
-}
 
 #if ACTIVE_MODULE == MODULE_PASSTHROUGH
 void moduleSetup() {
@@ -98,11 +78,6 @@ void moduleLoopUpstream(int16_t* inputBuffer,
 }
 #endif
 
-
-// All modules now use a single samplesLength across both interfaces.
-
-unsigned long startup_time = 0;
-
 // Directional processing API (implemented by active module)
 void moduleLoopUpstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
 void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
@@ -123,7 +98,15 @@ static inline void processPath(i2s_port_t readPort,
   }
 }
 
+unsigned long startup_time = 0;
+static unsigned long lastLoopMs = 0;
+static unsigned long accumulatedDeltaMs = 0;
+static unsigned long baseLoopMs = 0;
+static bool startup_active = true;
+
 void setup() {
+  neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
+
   Serial.begin(115200);
   Serial.println("ESP32-S3-Zero I2S Audio Processing (GPIO 1-13)");
 
@@ -142,14 +125,32 @@ void setup() {
   Serial.println("Setup complete. Audio processing active on GPIO 10-13.");
   Serial.println("Audio Input -> ESP32 -> Audio Processing -> ESP32 -> Audio Output");
   startup_time = millis();
-  // NeoPixel off at start
-  setNeoPixelColor(0, 0, 0);
 }
 
 void loop() {
+  // Coherent delta time tracking for effects updates
+  unsigned long nowMs = millis();
+  if (lastLoopMs == 0) {
+    lastLoopMs = nowMs;
+    baseLoopMs = nowMs;
+  }
+  unsigned long normalizedNow = nowMs - baseLoopMs;
+  unsigned long deltaMs = 0;
+  if (normalizedNow > accumulatedDeltaMs) {
+    deltaMs = normalizedNow - accumulatedDeltaMs;
+    accumulatedDeltaMs += deltaMs;
+  }
+
+  neopixelUpdate((uint32_t)deltaMs);
+
   // During startup mute window, do not process; keep outputs silent
   if (!(startup_time == 0 || millis() - startup_time > 1000)) {
     return;
+  }
+
+  if (startup_active) {
+    startup_active = false;
+    neopixelSetTimedColor(0, 25, 0, 200, NEOPIXEL_MODE_LINEAR);
   }
 
   // Upstream path: I2SD -> processing -> I2SU
