@@ -89,7 +89,7 @@ void gatewaySetup() {
   Wire.setTimeOut(50);
 
   // With gateway enabled, the system policy is: both I2S interfaces run as MASTER.
-  Serial.println("Gateway enabled: I2S0 MASTER, I2S1 MASTER");
+  Serial.println("Gateway enabled: I2SD MASTER, I2SU MASTER");
 
   // Provide the codec a brief power-up window before configuration
   delay(20);

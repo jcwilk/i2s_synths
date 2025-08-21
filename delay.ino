@@ -14,26 +14,23 @@ void moduleSetup() {
   Serial.println("Delay module initialized: 1-second delay active");
 }
 
-void moduleLoop(int16_t* inputBuffer,
-                int16_t* outputBuffer,
-                int16_t* inputBuffer2,
-                int16_t* outputBuffer2,
-                int samplesLength) {
-  // Forward secondary input to secondary output unchanged
+void moduleLoopUpstream(int16_t* inputBuffer,
+                        int16_t* outputBuffer,
+                        int samplesLength) {
+  // Upstream path: passthrough by default
   if (samplesLength > 0) {
-    memcpy(outputBuffer2, inputBuffer2, samplesLength * sizeof(int16_t));
+    memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
   }
+}
 
-  // Process primary samples through the delay buffer
+void moduleLoopDownstream(int16_t* inputBuffer,
+                          int16_t* outputBuffer,
+                          int samplesLength) {
+  // Process downstream samples through the delay buffer
   for (int i = 0; i < samplesLength; i++) {
-    // Store current input sample in delay buffer
     delayBuffer[delayIndex] = inputBuffer[i];
-
-    // Get delayed sample from buffer (1 second ago)
     uint32_t delayedIndex = (delayIndex + 1) % (DELAY_SAMPLES * 2);
     outputBuffer[i] = delayBuffer[delayedIndex];
-
-    // Advance delay buffer index
     delayIndex = (delayIndex + 1) % (DELAY_SAMPLES * 2);
   }
 }

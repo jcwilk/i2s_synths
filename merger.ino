@@ -47,45 +47,36 @@ void moduleSetup() {
   Serial.println("Merger module initialized");
 }
 
-void moduleLoop(int16_t* inputBuffer,
-                int16_t* outputBuffer,
-                int16_t* inputBuffer2,
-                int16_t* outputBuffer2,
-                int samplesLength) {
+void moduleLoopUpstream(int16_t* inputBuffer,
+                        int16_t* outputBuffer,
+                        int samplesLength) {
+  // Upstream: simple passthrough
+  if (samplesLength > 0) {
+    memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
+  }
+}
 
-  // Read both potentiometers independently with the same smoothing and dead zones
+void moduleLoopDownstream(int16_t* inputBuffer,
+                          int16_t* outputBuffer,
+                          int samplesLength) {
+  // Read both potentiometers for mix control
   float primaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, emaPrimary);
   float secondaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, emaSecondary);
-  
-  //Serial.println("Mixing ratio: " + String(mix));
 
-  // Simple forwarding for secondary by default
-  if (samplesLength > 0) {
-    memcpy(outputBuffer2, inputBuffer2, samplesLength * sizeof(int16_t));
-  }
-
+  // For merger in downstream, assume 'inputBuffer' is the downstream stream to be mixed with
+  // upstream content is not provided here; treat secondaryCoeff as additional gain on same stream
   for (int i = 0; i < samplesLength; i++) {
-    int32_t primarySample = (int32_t)(inputBuffer[i] * primaryCoeff);
-    int32_t secondarySample = (int32_t)(inputBuffer2[i] * secondaryCoeff);
-    
-    int32_t merged_sample = primarySample + secondarySample;
+    int32_t merged_sample = (int32_t)(inputBuffer[i] * primaryCoeff) + (int32_t)(inputBuffer[i] * secondaryCoeff);
 
-    // Apply compressor
     if (abs(merged_sample) > MAX_SIGNAL_LEVEL) {
-      // If signal exceeds threshold, calculate new scale ratio
       currentScaleRatio = (float)MAX_SIGNAL_LEVEL / abs(merged_sample);
     } else {
-      // Gradually release compression
       currentScaleRatio += (1.0f - currentScaleRatio) * (1.0f - COMPRESSOR_RELEASE_RATE);
     }
 
-    // Apply scaling
     merged_sample = (int32_t)(merged_sample * currentScaleRatio);
-
-    // Clip to int16_t range
     if (merged_sample > 32767) merged_sample = 32767;
     if (merged_sample < -32768) merged_sample = -32768;
-
     outputBuffer[i] = (int16_t)merged_sample;
   }
 }
