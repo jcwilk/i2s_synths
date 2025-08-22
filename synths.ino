@@ -113,7 +113,6 @@ static bool startup_active = true;
 static float readPotWithSmoothingAndDeadZone(int pin, float& emaState) {
   float raw = 1.0f - ((float)analogRead(pin) / ADC_MAX); // invert the pot value
   emaState = (EMA_ALPHA * raw) + ((1.0f - EMA_ALPHA) * emaState);
-  Serial.println("Pin" + String(pin) + " Pot value: " + String(raw)+ " EMA: " + String(emaState));
 
   if (emaState < DEAD_ZONE_LOW) {
     return 0.0f;
