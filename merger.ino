@@ -130,6 +130,9 @@ void moduleLoopDownstream(int16_t* inputBuffer,
   // Read both potentiometers for mix control
   float primaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, emaPrimary);
   float secondaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, emaSecondary);
+  // Allow up to 110% gain on secondary at max to slightly boost overall volume
+  secondaryCoeff *= 1.10f;
+  if (secondaryCoeff > 1.10f) secondaryCoeff = 1.10f;
 
   // Downstream path: mix downstream input (scaled by primary) with upstream data
   // pulled from the ring buffer (scaled by secondary). Apply simple compressor on the sum.
