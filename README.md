@@ -62,18 +62,6 @@ The gateway module is mostly the same except it needs another two pins for I2C t
 
 ### Versions
 
-v0 - brief initial attempt
-* Have one master clock from the gateway forwarded from module to module and driving all interfaces
-* Have each interface dedicated to a stream direction to try to sidestep some clock domain issues, which meant both interfaces were connecting to each neighbor
-* No power sharing, each chip needs to be individually powered via USB-C
-* I quickly discovered this was begging for electrical problems, high frequency clock signals and long transmission lines with lots of stubs drawing energy from it along the line made the signal untenable after a module or two.
-
-v1 - the current version
-* Each module only sends signals to its upstream and downstream neighbors
-* Each interface dedicated to a particular neighbor
-* Still no power sharing, each chip needs to be individually powered via USB-C
-* Due to poorly regulated power and poorly designed and organized transmisson lines, there's a fair amount of intrusive noise that happens
-
 v2 - the next version currently under construction
 * Each module only sends signals to its upstream and downstream neighbors
 * Each interface dedicated to a particular neighbor
@@ -82,3 +70,15 @@ v2 - the next version currently under construction
 * Carefully chosen and arranged pins for being able to connect straight out to the neighbor via headers for very short clock transmission lines
 * Use an additional "master clock" clock signal which may help keep the samples more reliably transmitted
 * Replace WM8960 with Pmod I2S2 for hopefully more consistent and better documented ADC/DAC behavior
+
+v1 - the current version
+* Each module only sends signals to its upstream and downstream neighbors
+* Each interface dedicated to a particular neighbor
+* Still no power sharing, each chip needs to be individually powered via USB-C
+* Due to poorly regulated power and poorly designed and organized transmisson lines, there's a fair amount of intrusive noise that happens
+
+v0 - brief initial attempt
+* Have one master clock from the gateway forwarded from module to module and driving all interfaces
+* Have each interface dedicated to a stream direction to try to sidestep some clock domain issues, which meant both interfaces were connecting to each neighbor
+* No power sharing, each chip needs to be individually powered via USB-C
+* I quickly discovered this was begging for electrical problems, high frequency clock signals and long transmission lines with lots of stubs drawing energy from it along the line made the signal untenable after a module or two.
