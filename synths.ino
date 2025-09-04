@@ -19,25 +19,7 @@ int16_t rxBufferUpstream[BUFFER_LEN];     // input from I2SD → to I2SU
 int16_t txBufferUpstream[BUFFER_LEN];
 
 
-#if ACTIVE_MODULE == MODULE_PASSTHROUGH
-void moduleSetup() {
-  Serial.println("Passthrough module active");
-}
-void moduleLoopDownstream(int16_t* inputBuffer,
-                          int16_t* outputBuffer,
-                          int samplesLength) {
-  if (outputBuffer && inputBuffer && samplesLength > 0) {
-    memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
-  }
-}
-void moduleLoopUpstream(int16_t* inputBuffer,
-                        int16_t* outputBuffer,
-                        int samplesLength) {
-  if (outputBuffer && inputBuffer && samplesLength > 0) {
-    memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
-  }
-}
-#endif
+ 
 
 // Directional processing API (implemented by active module)
 void moduleLoopUpstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
@@ -46,6 +28,14 @@ void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int sampl
 // Include the selected audio processing module header when needed
 #if ACTIVE_MODULE == MODULE_MERGER
 #include "src/modules/merger/merger.h"
+#elif ACTIVE_MODULE == MODULE_DEBUG_TONE
+#include "src/modules/debug_tone/debug_tone.h"
+#elif ACTIVE_MODULE == MODULE_DELAY
+#include "src/modules/delay/delay.h"
+#elif ACTIVE_MODULE == MODULE_CUTOFF
+#include "src/modules/cutoff/cutoff.h"
+#elif ACTIVE_MODULE == MODULE_PASSTHROUGH
+#include "src/modules/passthrough/passthrough.h"
 #endif
 
 static inline void processPath(i2s_port_t readPort,
@@ -69,63 +59,7 @@ static unsigned long lastLoopMs = 0;
 static unsigned long accumulatedDeltaMs = 0;
 static unsigned long baseLoopMs = 0;
 static bool startup_active = true;
-
-#include "src/input/pots.h"
-
-void setup() {
-  neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
-
-  Serial.begin(115200);
-  Serial.println("ESP32-S3-Zero I2S Audio Processing (GPIO 1-13)");
-
-  // Initialize gateway (WM8960 management)
-  gatewaySetup();
-
-  // Setup I2S for bidirectional communication
-  setupI2SD();
-
-  // Setup secondary I2S interface (RX + TX as slave)
-  setupI2SU();
-
-  // Initialize audio processing module
-  moduleSetup();
-
-  Serial.println("Setup complete. Audio processing active on GPIO 10-13.");
-  Serial.println("Audio Input -> ESP32 -> Audio Processing -> ESP32 -> Audio Output");
-  startup_time = millis();
-}
-
-void loop() {
-  // Coherent delta time tracking for effects updates
-  unsigned long nowMs = millis();
-  if (lastLoopMs == 0) {
-    lastLoopMs = nowMs;
-    baseLoopMs = nowMs;
-  }
-  unsigned long normalizedNow = nowMs - baseLoopMs;
-  unsigned long deltaMs = 0;
-  if (normalizedNow > accumulatedDeltaMs) {
-    deltaMs = normalizedNow - accumulatedDeltaMs;
-    accumulatedDeltaMs += deltaMs;
-  }
-
-  neopixelUpdate((uint32_t)deltaMs);
-
-  // During startup mute window, do not process; keep outputs silent
-  if (!(startup_time == 0 || millis() - startup_time > 1000)) {
-    return;
-  }
-
-  if (startup_active) {
-    startup_active = false;
-    neopixelSetTimedColor(0, 25, 0, 200, NEOPIXEL_MODE_LINEAR);
-  }
-
-  // Upstream path: I2SD -> processing -> I2SU
-  processPath(I2SD_PORT, I2SU_PORT, rxBufferUpstream, txBufferUpstream, moduleLoopUpstream);
-  // Downstream path: I2SU -> processing -> I2SD
-  processPath(I2SU_PORT, I2SD_PORT, rxBufferDownstream, txBufferDownstream, moduleLoopDownstream);
-}
+#include "src/gateway/gateway.h"
 
 void setupI2SD() {
   // Configure I2S for bidirectional communication (RX + TX)
@@ -220,3 +154,59 @@ void setupI2SU() {
                 I2SU_SCK, I2SU_WS, I2SU_SD_OUT, I2SU_SD_IN);
   #endif
 }
+
+void setup() {
+  neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
+
+  Serial.begin(115200);
+  Serial.println("ESP32-S3-Zero I2S Audio Processing (GPIO 1-13)");
+
+  // Initialize gateway (WM8960 management)
+  gatewaySetup();
+
+  // Setup I2S for bidirectional communication
+  setupI2SD();
+
+  // Setup secondary I2S interface (RX + TX as slave)
+  setupI2SU();
+
+  // Initialize audio processing module
+  moduleSetup();
+
+  Serial.println("Setup complete. Audio processing active on GPIO 10-13.");
+  Serial.println("Audio Input -> ESP32 -> Audio Processing -> ESP32 -> Audio Output");
+  startup_time = millis();
+}
+
+void loop() {
+  // Coherent delta time tracking for effects updates
+  unsigned long nowMs = millis();
+  if (lastLoopMs == 0) {
+    lastLoopMs = nowMs;
+    baseLoopMs = nowMs;
+  }
+  unsigned long normalizedNow = nowMs - baseLoopMs;
+  unsigned long deltaMs = 0;
+  if (normalizedNow > accumulatedDeltaMs) {
+    deltaMs = normalizedNow - accumulatedDeltaMs;
+    accumulatedDeltaMs += deltaMs;
+  }
+
+  neopixelUpdate((uint32_t)deltaMs);
+
+  // During startup mute window, do not process; keep outputs silent
+  if (!(startup_time == 0 || millis() - startup_time > 1000)) {
+    return;
+  }
+
+  if (startup_active) {
+    startup_active = false;
+    neopixelSetTimedColor(0, 25, 0, 200, NEOPIXEL_MODE_LINEAR);
+  }
+
+  // Upstream path: I2SD -> processing -> I2SU
+  processPath(I2SD_PORT, I2SU_PORT, rxBufferUpstream, txBufferUpstream, moduleLoopUpstream);
+  // Downstream path: I2SU -> processing -> I2SD
+  processPath(I2SU_PORT, I2SD_PORT, rxBufferDownstream, txBufferDownstream, moduleLoopDownstream);
+}
+

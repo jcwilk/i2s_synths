@@ -48,6 +48,42 @@ Because modules are arbitrarily programmable, they can tap into these two stream
 
 See [AI_INSTRUCTIONS.md](./AI_INSTRUCTIONS.md) for instructions for ai coding agents.
 
+### Code layout (where to find things)
+
+- **Main sketch**: `synths.ino`
+  - Initializes I2S, gateway, and the active audio module
+  - Processing entrypoints: `moduleSetup()`, `moduleLoopUpstream(...)`, `moduleLoopDownstream(...)`
+  - I2S read/write wrapper: `processPath(...)`
+
+- **Configuration constants**: `src/config/constants.h`
+  - Module IDs (`MODULE_*`), pins, buffer sizes, I2S config
+  - Active module selection via `ACTIVE_MODULE` (default set here)
+  - Gateway or not via `ENABLE_GATEWAY`
+
+- **Gateway (ADC/DAC management)**: `src/gateway/gateway.h`
+  - `gatewaySetup()` and `setupWM8960ForI2S()`; compiled when `ENABLE_GATEWAY` is 1
+
+- **Audio modules**: `src/modules/<name>/<name>.h` (header‑only)
+  - Current modules: `merger`, `debug_tone`, `delay`, `cutoff`
+  - Each provides `moduleSetup`, `moduleLoopUpstream`, `moduleLoopDownstream`
+  - The active one is included conditionally in `synths.ino` based on `ACTIVE_MODULE`
+
+- **Shared inputs (potentiometers)**: `src/input/pots.h`
+  - Helper: `readPotWithSmoothingAndDeadZone(pin, emaState)` returns a smoothed 0..1 value with dead‑zone
+
+- **UI / status LED (NeoPixel)**: `src/ui/neopixel.h`
+  - `neopixelSetTimedColor(r,g,b,durationMs,mode)` and `neopixelUpdate(deltaMs)` for timed effects
+  - Modes: `NEOPIXEL_MODE_HOLD`, `NEOPIXEL_MODE_LINEAR`, `NEOPIXEL_MODE_QUADRATIC`
+
+- **Selecting an active module**
+  - By default, `ACTIVE_MODULE` is defined in `src/config/constants.h`
+  - You can override it by defining `ACTIVE_MODULE` before including `constants.h` in `synths.ino`
+
+Reading tips:
+- Start at `synths.ino` → find the two calls to `processPath(...)` inside `loop()` to see dataflow
+- Jump to the active module header in `src/modules/...` for the actual DSP
+- Check `src/config/constants.h` for pins/buffer sizes/sample rate when reasoning about timing or capacity
+
 ### Hardware Design and Pinouts
 
 See [ai/hardware.md](ai/hardware.md) for hardware details.
