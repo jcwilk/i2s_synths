@@ -1,0 +1,11 @@
+---
+description: Always reference project instruction file
+globs:
+alwaysApply: true
+---
+
+# Project Context
+
+Always reference and follow the instructions in the project instruction file:
+
+@AI_INSTRUCTIONS.md

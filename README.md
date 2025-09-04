@@ -1,4 +1,4 @@
-# ESP32 Digital Modular Synthesizers Project v1
+# ESP32 Digital Modular Synthesizers Project v2 (pre - still WIP transitioning from v1)
 
 A project that grew out of the frustration of how expensive and tedious it is to explore hardware synthesizers.
 
@@ -30,7 +30,7 @@ Each ESP32 chip has two I2S interfaces which each provide their own input and ou
 gateway (master) -> (slave) MODULE A (master) -> (slave) MODULE B (master) -> ...etc
 ```
 
-Basically each module serves as master for the connection to its right, and serves as slave for the connection to its left. This works because the last module on the right will be master with corresponding slave, which works fine since a clock signal is still being generated.
+Basically each module serves as master for the connection to its right, and serves as slave for the connection to its left. This works because the last module on the right will be master with no corresponding slave, which works fine since a clock signal is still being generated.
 
 Because each interface is full duplex (input and output) this means that we can think of the system as having downstream and upstream sample flows:
 
@@ -44,25 +44,17 @@ And then we can use a special connector at the end to connect the last module's 
 
 Because modules are arbitrarily programmable, they can tap into these two streams and redirect samples between them. For example, if in the above diagram "MODULE A" had a feature where it merged upstream samples back into downstream samples then it would form an echo/feedback loop. In other words, even though the modules physically form a linear chain, non-linear behaviors can still be induced due to the downstream/upstream paradigm.
 
-### Hardware Design
+### AI Integration
 
-For version 1 the hardware built around the ESP32-S3-Zero chip is extremely minimal with lots of stranded wires soldered into a breadboard, long transmission lines, and other problematic rushed aspects as I just wanted to confirm the overall paradigm and start seeing some results before going down too many hardware rabbit holes. I won't go into the specifics of the hardware further because I don't recommend it to be reproduced, see version 2 for better circuit designs.
+See [AI_INSTRUCTIONS.md](./AI_INSTRUCTIONS.md) for instructions for ai coding agents.
 
-Waveshare ESP32-S3-Zero chips for all modules
-Waveshare WM8960 Audio HAT attached to the gateway module for ADC/DAC
+### Hardware Design and Pinouts
 
-### Pinouts
-
-See [synths.ino](./synths.ino) for which specific pin was chosen, but in general for the non-gateway modules:
-* 4 pins for downstream I2S interface (bit clock, word clock, input data, output data)
-* 4 pins for upstream I2S interface (bit clock, word clock, input data, output data)
-* 2 pins for potentiometers
-
-The gateway module is mostly the same except it needs another two pins for I2C to configure the WM8960
+See [ai/hardware.md](ai/hardware.md) for hardware details.
 
 ### Versions
 
-v2 - the next version currently under construction
+v2-pre - the current version under construction
 * Each module only sends signals to its upstream and downstream neighbors
 * Each interface dedicated to a particular neighbor
 * Shared power rail which gets extended by each module, and drawn from for power - only the gateway needs to be powered
