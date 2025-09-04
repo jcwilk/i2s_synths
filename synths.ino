@@ -1,57 +1,17 @@
 #include <driver/i2s.h>
+#include "src/config/constants.h"
 
-// Module selection
-#define MODULE_PASSTHROUGH 0
-#define MODULE_DELAY 1
-#define MODULE_MERGER 2
-#define MODULE_DEBUG_TONE 3
-#define MODULE_CUTOFF 4
-#define ACTIVE_MODULE MODULE_DEBUG_TONE
+// Select active module by defining ACTIVE_MODULE before constants.h, or rely on its default.
 
-#define ENABLE_GATEWAY 1
 // Interface role policy:
 // - Downstream (I2SD / I2S0) is ALWAYS master
 // - Upstream (I2SU / I2S1) is slave, EXCEPT when ENABLE_GATEWAY == 1, then it is master too
 // The old I2S_IS_SLAVE toggle is no longer used for I2SD
 
-// I2S pin definitions for ESP32-S3-Zero (GPIO 1-13 only)
-#define I2SD_WS 13 // Word Select (Left/Right Clock) - shared (Downstream)
-#define I2SD_SD_IN 12 // Serial Data In (ADC data FROM WM8960)
-#define I2SD_SD_OUT 10 // Serial Data Out (DAC data TO WM8960)
-#define I2SD_SCK 11 // Serial Clock (Bit Clock) - shared
-
-#define I2SD_PORT I2S_NUM_0
-
-// Upstream I2S (I2S_NUM_1) pin definitions
-#define I2SU_WS 7
-#define I2SU_SD_IN 9
-#define I2SU_SD_OUT 4
-#define I2SU_SCK 8
-#define I2SU_PORT I2S_NUM_1
-
-// Shared potentiometer pin assignments (available to all modules)
-#define POT_PIN_PRIMARY 1
-#define POT_PIN_SECONDARY 2
-
-#define STARTUP_TIME_MS 1000
-
-#define SAMPLE_RATE 44100
-#define BUFFER_LEN 128
-#define I2S_DMA_BUF_COUNT 4
-#define I2S_BITS_PER_SAMPLE I2S_BITS_PER_SAMPLE_16BIT
-#define I2S_CHANNEL_FORMAT I2S_CHANNEL_FMT_RIGHT_LEFT
-#define I2S_COMM_FORMAT I2S_COMM_FORMAT_STAND_I2S
-#define I2S_INTR_ALLOC_FLAGS 0
-#define I2S_USE_APLL false
-#define I2S_TX_DESC_AUTO_CLEAR false
-#define I2S_FIXED_MCLK 0
-#define I2S_MCLK_MULTIPLE I2S_MCLK_MULTIPLE_512
-#define I2S_BITS_PER_CHAN I2S_BITS_PER_CHAN_DEFAULT
+// Pins and config come from src/config/constants.h
 
 // Timed color effect with optional fade behavior
-#define NEOPIXEL_MODE_HOLD 0       // stay at full color for duration, then off
-#define NEOPIXEL_MODE_LINEAR 1     // fade linearly to off over duration
-#define NEOPIXEL_MODE_QUADRATIC 2  // fade quadratically to off over duration
+#include "src/ui/neopixel.h"
 
 int16_t rxBufferDownstream[BUFFER_LEN];   // input from I2SU → to I2SD
 int16_t txBufferDownstream[BUFFER_LEN];
@@ -83,6 +43,11 @@ void moduleLoopUpstream(int16_t* inputBuffer,
 void moduleLoopUpstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
 void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
 
+// Include the selected audio processing module header when needed
+#if ACTIVE_MODULE == MODULE_MERGER
+#include "src/modules/merger/merger.h"
+#endif
+
 static inline void processPath(i2s_port_t readPort,
                                i2s_port_t writePort,
                                int16_t* rxBuffer,
@@ -105,23 +70,7 @@ static unsigned long accumulatedDeltaMs = 0;
 static unsigned long baseLoopMs = 0;
 static bool startup_active = true;
 
-#define ADC_MAX 4095
-#define EMA_ALPHA 0.05f // Exponential Moving Average alpha (smoothing factor)
-#define DEAD_ZONE_LOW 0.02f // 2% dead zone
-#define DEAD_ZONE_HIGH 0.98f // 98% dead zone
-
-static float readPotWithSmoothingAndDeadZone(int pin, float& emaState) {
-  float raw = 1.0f - ((float)analogRead(pin) / ADC_MAX); // invert the pot value
-  emaState = (EMA_ALPHA * raw) + ((1.0f - EMA_ALPHA) * emaState);
-
-  if (emaState < DEAD_ZONE_LOW) {
-    return 0.0f;
-  }
-  if (emaState > DEAD_ZONE_HIGH) {
-    return 1.0f;
-  }
-  return (emaState - DEAD_ZONE_LOW) / (DEAD_ZONE_HIGH - DEAD_ZONE_LOW);
-}
+#include "src/input/pots.h"
 
 void setup() {
   neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);

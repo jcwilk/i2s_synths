@@ -11,6 +11,7 @@
 
 
 // Frequency range controlled by the primary potentiometer
+#include "src/input/pots.h"
 #ifndef DEBUG_TONE_MIN_FREQ_HZ
 #define DEBUG_TONE_MIN_FREQ_HZ 200.0f
 #endif

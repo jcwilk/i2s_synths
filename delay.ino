@@ -1,8 +1,8 @@
 // Delay module for audio processing
 #include <math.h>
 
-// Forward declaration for shared helper from synths.ino
-static float readPotWithSmoothingAndDeadZone(int pin, float& emaState);
+// Use shared potentiometer helper
+#include "src/input/pots.h"
 
 #if ACTIVE_MODULE == MODULE_DELAY
 // Delay buffer configuration

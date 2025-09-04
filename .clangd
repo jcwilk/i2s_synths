@@ -1,0 +1,21 @@
+CompileFlags:
+  Add:
+    # Xtensa newlib headers (before system)
+    - -I/home/user/.arduino15/packages/esp32/tools/esp-x32/2411/xtensa-esp-elf/include
+
+    # Then your other flags…
+    - -I${workspaceFolder}/include
+    - -I/home/user/.arduino15/packages/esp32/hardware/esp32/3.3.0/cores/esp32
+    - -I/home/user/.arduino15/packages/esp32/hardware/esp32/3.3.0/cores/esp32/hal
+    - -I/home/user/.arduino15/packages/esp32/hardware/esp32/3.3.0/libraries
+    - -I/home/user/.arduino15/packages/esp32/hardware/esp32/3.3.0/tools/sdk/esp32s3/include
+
+  Remove:
+    - -mlongcalls
+    - -mdisable-hardware-atomics  
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+
+Diagnostics:
+  Suppress:
+    - pp_expr_bad_token_lparen

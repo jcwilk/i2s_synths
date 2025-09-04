@@ -1,52 +1,50 @@
-# Code Structure and Organization
+# Code Structure and Organization (Consolidated)
 
-Authoritative rules for organizing Arduino C++ in this repo. Keep it modular, Arduino-IDE compatible, and easy to navigate.
-
----
-
-## 1) Root Directory
-- The **only** C++ file at project root is the main sketch:
-  - `MyProject.ino`
-- **Everything else** lives under `src/`.
+Authoritative rules for organizing Arduino C++ in this repo. Keep it modular, Arduino‑IDE compatible, and easy to navigate.
 
 ---
 
-## 2) Folder Layout (placeholders only)
-Organize by concept under `src/` using clear, single-purpose folders. Avoid hard-coding names in this guide so the structure remains stable as files move.
+## 1) Project Layout
+
+* The **only** C++ file at project root is the main sketch: `MyProject.ino`.
+* **Everything else** lives under `src/`.
+
+**Example layout**
 
 ```
-
 MyProject/
 ├── MyProject.ino
 └── src/
-├── modules/
-│   └── some\_module\_name/
-│       └── some\_module\_name.h      // header-only preferred (see §4, §5)
-├── feature\_area\_a/
-│   └── some\_header.h
-└── feature\_area\_b/
-└── another\_header.h
+    ├── modules/
+    │   └── some_module_name/
+    │       └── some_module_name.h
+    ├── feature_area_a/
+    │   └── some_header.h
+    └── feature_area_b/
+        └── another_header.h
+```
 
-````
+**Notes**
 
-Notes:
-- **`src/modules/` is reserved** for audio processing modules (see §5).
-- Other folders are placeholders (e.g., `feature_area_a/`)—name them to match function (sensors, i2s, ui, hw, etc.).
-- Keep each folder self-contained (all `.cpp` in a folder compile together if any header from that folder is included).
-
----
-
-## 3) Arduino IDE Compilation Rules (must-know)
-- **Auto-compiled:** `MyProject.ino`, and **all** `.cpp` files inside `src/` (recursively).
-- **Not auto-compiled:** `.cpp` outside `src/`, or in arbitrary non-`src/` subfolders at root.
-- **Include behavior:** If you include **any header** from a folder, **all `.cpp` in that folder** are compiled. Design folders so their contents can coexist.
+* `src/modules/` is **reserved** for audio processing modules (see §4).
+* Other folders are placeholders—name them to match function (e.g., `sensors`, `i2s`, `ui`, `hw`).
 
 ---
 
-## 4) Header-Only Preferred
-Use header-only with `inline` methods for simplicity and predictable linkage.
+## 2) Arduino IDE Compilation Rules (authoritative)
 
-Example (template):
+* **Auto‑compiled:** `MyProject.ino` and **all** `.cpp` files inside `src/` (recursively).
+* **Not auto‑compiled:** `.cpp` files **outside** `src/` or in arbitrary non‑`src/` subfolders at root.
+* **Include behavior (co‑compile safety):** If you include **any header** from a folder, **all `.cpp` in that folder** are compiled. Design folders so their contents can coexist.
+
+---
+
+## 3) Header‑Only Preferred
+
+Prefer header‑only components with `inline` methods for simplicity, predictable linkage, and to avoid ODR issues.
+
+**Example (template)**
+
 ```cpp
 // src/feature_area_a/some_header.h
 #ifndef SOME_HEADER_H
@@ -61,21 +59,24 @@ public:
 };
 
 #endif
-````
+```
 
 ---
 
-## 5) Modules Convention (`src/modules/`)
+## 4) Modules Convention (`src/modules/`)
 
-**Purpose:** Encapsulate a processing module that the main sketch can load/select.
+**Purpose:** Encapsulate an audio processing module that the main sketch can load/select.
 
-**Location & naming:**
+**Location & naming**
 
-* Each module resides in: `src/modules/<some_module_name>/<some_module_name>.h`
-* Module should **assume it is the only module loaded**; no internal preprocessor selection.
-* The main sketch is responsible for selecting/including exactly one active module.
+* Each module resides at: `src/modules/<name>/<name>.h`.
 
-**Minimal module surface (template):**
+**Selection model**
+
+* The sketch selects **exactly one** active module by including its header.
+* Modules assume they are the only loaded module; **no preprocessor‑based selection** or global `#define` switching **inside** modules.
+
+**Minimal module surface (template)**
 
 ```cpp
 // src/modules/some_module_name/some_module_name.h
@@ -107,7 +108,7 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
 #endif
 ```
 
-**Integration in `MyProject.ino` (conceptual):**
+**Integration in `MyProject.ino` (conceptual)**
 
 ```cpp
 // Select one module by including its header:
@@ -119,44 +120,133 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
 //   moduleLoopDownstream(...);
 ```
 
-Guidelines:
+**Guidelines**
 
-* Keep module headers self-contained; avoid side-effects outside module scope.
-* No global `#define` switches inside modules for choosing other modules.
-* If a module needs helpers, place them in its own folder or a shared feature folder—ensure co-compilation safety (§3).
+* Keep module headers self‑contained; avoid side‑effects outside module scope.
+* If a module needs helpers, place them in its own folder or a shared concept folder—ensure co‑compilation safety per §2.
+
+---
+
+## 5) Concept‑Specific Headers (no junk drawer)
+
+Instead of a global “shared utils” header, create focused, concept‑scoped headers. Modules include only the concepts they use. Prefer header‑only (see §3).
+
+**Structure**
+
+```
+src/
+├── concept_a/
+│   └── concept_a.h
+├── concept_b/
+│   └── concept_b.h
+└── modules/
+    └── <module>/<module>.h   // Processing modules (see §4)
+```
+
+* If a symbol is needed by a module and not in a concept header, add it there first; do not declare it in the module header.
+
+**Minimal concept header template**
+
+```cpp
+// src/concept_a/concept_a.h
+#ifndef CONCEPT_A_H
+#define CONCEPT_A_H
+
+#ifdef ARDUINO
+#include <Arduino.h>
+#else
+#include <stdint.h>
+#endif
+
+// Public constants/types for this concept go here (generic).
+
+// Public inline APIs for this concept go here (generic shapes).
+inline int apiFunction(/* args */) {
+  // implement using Arduino APIs under ARDUINO, otherwise stub (see §7)
+  #ifdef ARDUINO
+  // ...
+  #else
+  return 0;
+  #endif
+}
+
+#endif
+```
 
 ---
 
 ## 6) When `.cpp` Is Necessary
 
-* Place `.cpp` **only** under `src/` (or its subfolders).
+* Use `.cpp` when you truly need separate translation units (e.g., large implementations, to hide heavy code, etc.).
 * Always `#include "Arduino.h"` and the corresponding header.
-* Keep folders conflict-free: everything in a folder must be safe to compile together.
+* Keep code in each folder compatible with the co‑compile behavior described in §2.
 
 ---
 
-## 7) Do / Don’t (quick)
+## 7) Lint‑Only Stubs and Portability
 
-**Do**
+**Goal:** Allow headers to parse under non‑Arduino tooling without breaking Arduino builds.
 
-* Keep only `MyProject.ino` at root; everything else under `src/`.
-* Prefer header-only; use `inline` to avoid ODR/link issues.
-* Use `src/modules/<some_module_name>/<some_module_name>.h` for processing modules.
-* Organize by function; design folders so all contained `.cpp` can compile together.
+**Rules**
 
-**Don’t**
+* Never redefine Arduino core enums/macros (e.g., `ADC_11db`).
+* Prefer `#ifdef ARDUINO` to gate Arduino‑specific code and includes.
+* Under non‑Arduino builds, provide no‑op or trivial stubs **only** for your own concept APIs, not core symbols.
+* If you need simple utilities (e.g., min/abs) in headers, define local helpers with distinct names to avoid macro collisions.
 
-* Put `.cpp` at root or outside `src/`.
-* Mix incompatible components in one folder.
-* Depend on hidden global switches inside modules.
+**Pattern (generic)**
+
+```cpp
+#ifdef ARDUINO
+#include <Arduino.h>
+#else
+#include <stdint.h>
+#include <string.h>
+#endif
+
+// Local helpers to avoid relying on Arduino macros in headers
+static inline uint32_t util_min_u32(uint32_t a, uint32_t b) { return a < b ? a : b; }
+static inline int32_t util_abs_i32(int32_t v) { return v < 0 ? -v : v; }
+
+#ifndef ARDUINO
+// Provide stubs for your own concept APIs only
+static inline void conceptBegin() {}
+#endif
+```
 
 ---
 
-## 8) Naming Conventions (lightweight)
+## 8) Helper Linkage and Ownership
+
+* Do **not** declare sketch‑local functions `extern` in module headers.
+* If multiple modules need a helper, move it into a concept header (§5) where its signature and ownership are clear.
+* For temporary bridging, add a thin wrapper in the relevant concept header that calls the sketch function under `#ifdef ARDUINO` and provides a safe stub otherwise.
+* Do not provide fallback #defines for project‑owned shared constants inside modules. Define them once in the relevant concept header and include that.
+
+**Example wrapper pattern (temporary during migration)**
+
+```cpp
+// src/concept_a/concept_a.h
+#ifdef ARDUINO
+// declare the sketch‑provided function here only if its signature is stable
+// void sketchConceptApi(/* args */);
+inline void conceptApi(/* args */) {
+  // sketchConceptApi(/* args */);
+}
+#else
+inline void conceptApi(/* args */) { /* no‑op */ }
+#endif
+```
+
+---
+
+## 9) Naming Conventions (lightweight)
 
 * **Macros/constants:** `ALL_CAPS_WITH_UNDERSCORES` (e.g., `SAMPLE_RATE`, `BUFFER_LEN`).
 * **Classes/Types:** `PascalCase` (e.g., `TemperatureSensor`).
 * **Functions/Methods/Variables:** `camelCase` (e.g., `processPath`, `rxBufferUpstream`).
 * **Files/Folders:** lowercase, short, descriptive (e.g., `modules/`, `some_module_name.h`).
 
----
+## 10) API Hygiene
+
+* Prefer int for mode/flag parameters in public APIs to avoid promotion/signature mismatches across C/C++ and toolchains; avoid narrow unsigned types (uint8_t) for such parameters unless protocol‑mandated.
