@@ -53,7 +53,7 @@ Waveshare WM8960 Audio HAT attached to the gateway module for ADC/DAC
 
 ### Pinouts
 
-See [./synths.ino](synths.ino) for which specific pin was chosen, but in general for the non-gateway modules:
+See [synths.ino](./synths.ino) for which specific pin was chosen, but in general for the non-gateway modules:
 * 4 pins for downstream I2S interface (bit clock, word clock, input data, output data)
 * 4 pins for upstream I2S interface (bit clock, word clock, input data, output data)
 * 2 pins for potentiometers
