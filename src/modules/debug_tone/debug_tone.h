@@ -21,8 +21,13 @@
 #define DEBUG_TONE_MAX_FREQ_HZ 2000.0f
 #endif
 
+// Optional override: define DEBUG_TONE_OVERRIDE_FREQ_HZ (e.g., 440)
+// to ignore potentiometers and generate a plain sine wave at that frequency.
+// Leave undefined to use pots for frequency and waveshape.
+#define DEBUG_TONE_OVERRIDE_FREQ_HZ 440
+
 #ifndef DEBUG_TONE_UPSTREAM
-#define DEBUG_TONE_UPSTREAM 0
+#define DEBUG_TONE_UPSTREAM 1
 #endif
 #ifndef DEBUG_TONE_DOWNSTREAM
 #define DEBUG_TONE_DOWNSTREAM 1
@@ -98,9 +103,17 @@ static inline void dtProcessDirection(int16_t* inputBuffer,
                                       float& phase01,
                                       bool generateTone) {
   if (!(samplesLength > 0 && outputBuffer)) return;
+  float freqHz;
+  float shape01;
+#ifdef DEBUG_TONE_OVERRIDE_FREQ_HZ
+  // Override: plain sine wave at fixed frequency; do not read pots
+  freqHz = (float)DEBUG_TONE_OVERRIDE_FREQ_HZ;
+  shape01 = 1.0f; // sine
+#else
   float potFreq = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, debugToneEmaPrimary);
-  float freqHz = dtMapPotToFrequency(potFreq);
-  float shape01 = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, debugToneEmaSecondary);
+  freqHz = dtMapPotToFrequency(potFreq);
+  shape01 = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, debugToneEmaSecondary);
+#endif
   const float phaseIncrement01 = freqHz / (float)SAMPLE_RATE;
   if (generateTone) {
     dtFillWave(outputBuffer, samplesLength, phase01, phaseIncrement01, DEBUG_TONE_AMPLITUDE, shape01);

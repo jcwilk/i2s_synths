@@ -60,9 +60,6 @@ See [AI_INSTRUCTIONS.md](./AI_INSTRUCTIONS.md) for instructions for ai coding ag
   - Active module selection via `ACTIVE_MODULE` (default set here)
   - Gateway or not via `ENABLE_GATEWAY`
 
-- **Gateway (ADC/DAC management)**: `src/gateway/gateway.h`
-  - `gatewaySetup()` and `setupWM8960ForI2S()`; compiled when `ENABLE_GATEWAY` is 1
-
 - **Audio modules**: `src/modules/<name>/<name>.h` (header‑only)
   - Current modules: `merger`, `debug_tone`, `delay`, `cutoff`
   - Each provides `moduleSetup`, `moduleLoopUpstream`, `moduleLoopDownstream`

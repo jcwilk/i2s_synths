@@ -1,7 +1,8 @@
 #ifndef CONFIG_CONSTANTS_H
 #define CONFIG_CONSTANTS_H
 
-#include <driver/i2s.h>
+#include <driver/i2s_common.h>
+#include <driver/i2s_std.h>
 
 // Module selection
 #define MODULE_PASSTHROUGH 0
@@ -31,15 +32,15 @@
 #define I2SU_MCK 1
 #define I2SU_WS 2
 #define I2SU_SCK 3
-#define I2SU_SD_OUT 4
-#define I2SU_SD_IN 5
+#define I2SU_SD_IN 4
+#define I2SU_SD_OUT 5
 #define I2SU_PORT I2S_NUM_1
 #else
 #define I2SU_MCK 2
 #define I2SU_WS 3
 #define I2SU_SCK 4
-#define I2SU_SD_OUT 5
-#define I2SU_SD_IN 6
+#define I2SU_SD_IN 5
+#define I2SU_SD_OUT 6
 #define I2SU_PORT I2S_NUM_1
 #endif
 // Shared potentiometer pins
@@ -53,19 +54,12 @@
 // Timings and audio config
 #define STARTUP_TIME_MS 1000
 
-// TODO: these are arbitrary and may not be optimal
+// I2S std-mode configuration (new driver)
+// Note: BUFFER_LEN counts int16_t samples (interleaved stereo uses 2 samples per frame)
 #define SAMPLE_RATE 44100
-#define BUFFER_LEN 128
-#define I2S_DMA_BUF_COUNT 4
-#define I2S_BITS_PER_SAMPLE I2S_BITS_PER_SAMPLE_16BIT
-#define I2S_CHANNEL_FORMAT I2S_CHANNEL_FMT_RIGHT_LEFT
-#define I2S_COMM_FORMAT I2S_COMM_FORMAT_STAND_I2S
-#define I2S_INTR_ALLOC_FLAGS 0
-#define I2S_USE_APLL false
-#define I2S_TX_DESC_AUTO_CLEAR false
-#define I2S_FIXED_MCLK 0
-#define I2S_MCLK_MULTIPLE I2S_MCLK_MULTIPLE_512
-#define I2S_BITS_PER_CHAN I2S_BITS_PER_CHAN_DEFAULT
+#define BUFFER_LEN 512
+#define I2S_DMA_BUF_COUNT 8
+#define I2S_MCLK_MULTIPLE I2S_MCLK_MULTIPLE_256
 
 #endif // CONFIG_CONSTANTS_H
 
