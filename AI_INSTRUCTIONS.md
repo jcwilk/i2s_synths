@@ -24,7 +24,8 @@ Your purpose: act as a focused assistant, consuming project context efficiently 
 ## 3. Project Entry Points
 - [`README.md`](./README.md) → High-level overview & motivation.  
 - [`ai/hardware.md`](./ai/hardware.md) → Hardware design, pinouts, and electrical details.  
-- [`ai/code_structure.md`](./ai/code_structure.md) → Code organization, key modules, and conventions.  
+- [`ai/code_structure.md`](./ai/code_structure.md) → Code organization, key modules, and conventions.
+- [`ai/library_reference/`](./ai/library_reference/) → Important library file headers relevant to current work
 
 ---
 
