@@ -48,6 +48,7 @@ void setup() {
   neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
 
   Serial.begin(115200);
+  delay(1000);
   Serial.println("ESP32-S3-Zero I2S Audio Processing");
 
   // Setup I2S interfaces (both downstream and upstream)
@@ -56,12 +57,25 @@ void setup() {
   // Initialize audio processing module
   moduleSetup();
 
-  Serial.println("Setup complete. Audio processing active on GPIO 10-13.");
-  Serial.println("Audio Input -> ESP32 -> Audio Processing -> ESP32 -> Audio Output");
+  Serial.println("Setup complete.");
   startup_time = millis();
 }
 
 void loop() {
+  // Coherent delta time tracking for UI updates
+  unsigned long nowMs = millis();
+  if (lastLoopMs == 0) {
+    lastLoopMs = nowMs;
+    baseLoopMs = nowMs;
+  }
+  unsigned long normalizedNow = nowMs - baseLoopMs;
+  unsigned long deltaMs = 0;
+  if (normalizedNow > accumulatedDeltaMs) {
+    deltaMs = normalizedNow - accumulatedDeltaMs;
+    accumulatedDeltaMs += deltaMs;
+  }
+  neopixelUpdate((uint32_t)deltaMs);
+
   const bool inStartupMute = !(startup_time == 0 || millis() - startup_time > 1000);
   if (!inStartupMute && startup_active) {
     startup_active = false;

@@ -247,6 +247,14 @@ inline void conceptApi(/* args */) { /* no‑op */ }
 * **Functions/Methods/Variables:** `camelCase` (e.g., `processPath`, `rxBufferUpstream`).
 * **Files/Folders:** lowercase, short, descriptive (e.g., `modules/`, `some_module_name.h`).
 
-## 10) API Hygiene
+---
+
+## 10) Configuration & Constants
+
+- Put globally relevant knobs and values users may tune in `src/config/constants.h` (e.g., sample rate, buffer counts, feature toggles).
+- Keep derived or local thresholds as `constexpr` in the module where they’re used (e.g., computed fractions of a global setting). These are private implementation details and should not be edited directly.
+- Document how derived constants relate to globals in comments near their definitions so changes propagate predictably.
+
+## 11) API Hygiene
 
 * Prefer int for mode/flag parameters in public APIs to avoid promotion/signature mismatches across C/C++ and toolchains; avoid narrow unsigned types (uint8_t) for such parameters unless protocol‑mandated.

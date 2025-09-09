@@ -26,6 +26,7 @@ Your purpose: act as a focused assistant, consuming project context efficiently 
 - [`ai/hardware.md`](./ai/hardware.md) → Hardware design, pinouts, and electrical details.  
 - [`ai/code_structure.md`](./ai/code_structure.md) → Code organization, key modules, and conventions.
 - [`ai/library_reference/`](./ai/library_reference/) → Important library file headers relevant to current work
+- [`ai/functional_programming.md`](./ai/functional_programming.md) → How we apply functional programming in C++ (state-returning APIs, immutable patterns, ISR-safe design).
 
 ---
 
@@ -43,5 +44,12 @@ Your purpose: act as a focused assistant, consuming project context efficiently 
 - Where assumptions are necessary, clearly mark them.  
 - Always ground responses in available repo context before guessing.  
 - Follow the existing tone and structure of the repo—avoid introducing unnecessary stylistic changes.  
+
+---
+
+## 6. Documentation Rules (to avoid code drift)
+- Do not reference specific source file paths, classes, or function names in `ai/` docs or this file.  
+- Prefer generic examples that convey patterns rather than concrete project identifiers.  
+- If you must include code snippets, make them self-contained and decoupled from current filenames/symbols.
 
 ---
