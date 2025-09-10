@@ -245,6 +245,7 @@ inline void conceptApi(/* args */) { /* no‑op */ }
 * **Macros/constants:** `ALL_CAPS_WITH_UNDERSCORES` (e.g., `SAMPLE_RATE`, `BUFFER_LEN`).
 * **Classes/Types:** `PascalCase` (e.g., `TemperatureSensor`).
 * **Functions/Methods/Variables:** `camelCase` (e.g., `processPath`, `rxBufferUpstream`).
+  * IMPORTANT: Avoid excessively short variable names except for things like "i", "n" etc in iteration loops etc which are fine. Normal variable names and functions should be descriptive and easy to read.
 * **Files/Folders:** lowercase, short, descriptive (e.g., `modules/`, `some_module_name.h`).
 
 ---
@@ -255,6 +256,13 @@ inline void conceptApi(/* args */) { /* no‑op */ }
 - Keep derived or local thresholds as `constexpr` in the module where they’re used (e.g., computed fractions of a global setting). These are private implementation details and should not be edited directly.
 - Document how derived constants relate to globals in comments near their definitions so changes propagate predictably.
 
+---
+
 ## 11) API Hygiene
 
 * Prefer int for mode/flag parameters in public APIs to avoid promotion/signature mismatches across C/C++ and toolchains; avoid narrow unsigned types (uint8_t) for such parameters unless protocol‑mandated.
+
+## 12) Coding Style
+
+* Prefer to have guard-style early returns to simplify later logic whenever possible, especially in longer functions.
+* Be very conservative with how many comments you use, and try to be defensive against comments drifting out of accuracy due to code changes.

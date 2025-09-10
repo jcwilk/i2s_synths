@@ -44,6 +44,22 @@ static inline I2SInputState i2s_input_clear_flags(I2SInputState s) {
   return s;
 }
 
+// Register future callbacks (none for now) and enable the RX channel. Must be called before first enable.
+static inline I2SInputState i2s_input_finalize(I2SInputState s) {
+  if (!s.rx_handle) {
+    s.rx_error = true;
+    reportError("i2s_input_finalize: rx_handle not set");
+    return s;
+  }
+  esp_err_t en_res = i2s_channel_enable(s.rx_handle);
+  if (en_res != ESP_OK) {
+    s.rx_error = true;
+    reportError("i2s_input_finalize: enable failed or already enabled");
+    return s;
+  }
+  return s;
+}
+
 static inline I2SInputReadOutcome i2s_input_read(I2SInputState s,
                                                  void* dest,
                                                  size_t bytes) {

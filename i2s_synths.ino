@@ -18,9 +18,6 @@ int16_t txBufferDownstream[BUFFER_LEN];
 int16_t rxBufferUpstream[BUFFER_LEN];     // input from I2SD → to I2SU
 int16_t txBufferUpstream[BUFFER_LEN];
 
-
- 
-
 // Directional processing API (implemented by active module)
 void moduleLoopUpstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
 void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
@@ -51,8 +48,8 @@ void setup() {
   delay(1000);
   Serial.println("ESP32-S3-Zero I2S Audio Processing");
 
-  // Setup I2S interfaces (both downstream and upstream)
-  i2sSetup();
+  // Setup I2S interfaces (both downstream and upstream) with module processing callbacks
+  i2sSetup(moduleLoopDownstream, moduleLoopUpstream);
 
   // Initialize audio processing module
   moduleSetup();

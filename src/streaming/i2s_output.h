@@ -5,6 +5,7 @@
 #include <driver/i2s_common.h>
 #include <stdlib.h>
 #include "../config/constants.h"
+#include "../ui/neopixel.h" // reportError
 
 #ifndef IRAM_ATTR
 #define IRAM_ATTR
@@ -58,19 +59,39 @@ static inline I2SOutputState i2s_output_make_initial(i2s_chan_handle_t tx_handle
   s.tx_sent_seen = 0;
   s.isr_totals = NULL;
   s.tx_handle = tx_handle;
-  if (tx_handle) {
+  return s;
+}
+
+// Register callbacks and enable the TX channel. Must be called before first enable.
+static inline I2SOutputState i2s_output_finalize(I2SOutputState s) {
+  if (!s.tx_handle) {
+    reportError("i2s_output_finalize: tx_handle not set");
+    return s;
+  }
+  if (!s.isr_totals) {
     I2SOutputIsrTotals* totals = (I2SOutputIsrTotals*)malloc(sizeof(I2SOutputIsrTotals));
-    if (totals) {
-      totals->tx_sent_total = 0;
-      s.isr_totals = totals;
-      const i2s_event_callbacks_t tx_cbs = {
-        .on_recv = NULL,
-        .on_recv_q_ovf = NULL,
-        .on_sent = i2s_output_tx_sent_cb,
-        .on_send_q_ovf = NULL,
-      };
-      i2s_channel_register_event_callback(tx_handle, &tx_cbs, (void*)totals);
+    if (!totals) {
+      reportError("i2s_output_finalize: totals alloc failed");
+      return s;
     }
+    totals->tx_sent_total = 0;
+    s.isr_totals = totals;
+  }
+  const i2s_event_callbacks_t tx_cbs = {
+    .on_recv = NULL,
+    .on_recv_q_ovf = NULL,
+    .on_sent = i2s_output_tx_sent_cb,
+    .on_send_q_ovf = NULL,
+  };
+  esp_err_t cb_res = i2s_channel_register_event_callback(s.tx_handle, &tx_cbs, (void*)s.isr_totals);
+  if (cb_res != ESP_OK) {
+    reportError("i2s_output_finalize: register callback failed");
+    return s;
+  }
+  esp_err_t en_res = i2s_channel_enable(s.tx_handle);
+  if (en_res != ESP_OK) {
+    reportError("i2s_output_finalize: enable failed or already enabled");
+    return s;
   }
   return s;
 }

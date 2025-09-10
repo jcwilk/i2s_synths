@@ -80,29 +80,31 @@ static inline float dtSampleBlendedWave(float phase01, float shape01) {
   }
 }
 
-static inline void dtFillWave(int16_t* outputBuffer,
-                              int sampleCount,
+static inline void dtFillWave(int16_t* outputBufferInterleaved,
+                              int samplesLength,
                               float& phase01,
                               const float phaseIncrement01,
                               const float amplitude,
                               const float shape01) {
-  for (int i = 0; i < sampleCount; i++) {
+  for (int i = 0; i < samplesLength; i+=2) {
     float sample = dtSampleBlendedWave(phase01, shape01) * amplitude;
     int32_t s = (int32_t)sample;
     if (s > 32767) s = 32767;
     if (s < -32768) s = -32768;
-    outputBuffer[i] = (int16_t)s;
+    int16_t si = (int16_t)s;
+    outputBufferInterleaved[i + 0] = si;
+    outputBufferInterleaved[i + 1] = si;
     phase01 += phaseIncrement01;
     if (phase01 >= 1.0f) phase01 -= 1.0f;
   }
 }
 
-static inline void dtProcessDirection(int16_t* inputBuffer,
-                                      int16_t* outputBuffer,
+static inline void dtProcessDirection(int16_t* inputBufferInterleaved,
+                                      int16_t* outputBufferInterleaved,
                                       int samplesLength,
                                       float& phase01,
                                       bool generateTone) {
-  if (!(samplesLength > 0 && outputBuffer)) return;
+  if (!(samplesLength > 0 && outputBufferInterleaved)) return;
   float freqHz;
   float shape01;
 #ifdef DEBUG_TONE_OVERRIDE_FREQ_HZ
@@ -116,9 +118,9 @@ static inline void dtProcessDirection(int16_t* inputBuffer,
 #endif
   const float phaseIncrement01 = freqHz / (float)SAMPLE_RATE;
   if (generateTone) {
-    dtFillWave(outputBuffer, samplesLength, phase01, phaseIncrement01, DEBUG_TONE_AMPLITUDE, shape01);
-  } else if (inputBuffer) {
-    memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
+    dtFillWave(outputBufferInterleaved, samplesLength, phase01, phaseIncrement01, DEBUG_TONE_AMPLITUDE, shape01);
+  } else if (inputBufferInterleaved) {
+    memcpy(outputBufferInterleaved, inputBufferInterleaved, (size_t)samplesLength * sizeof(int16_t));
   }
 }
 
@@ -128,16 +130,16 @@ inline void moduleSetup() {
   debugTonePhaseDownstream = 0.0f;
 }
 
-inline void moduleLoopUpstream(int16_t* inputBuffer,
-                               int16_t* outputBuffer,
-                               int samplesLength) {
-  dtProcessDirection(inputBuffer, outputBuffer, samplesLength, debugTonePhaseUpstream, DEBUG_TONE_UPSTREAM);
+inline void moduleLoopUpstream(int16_t* inputBufferInterleaved,
+                               int16_t* outputBufferInterleaved,
+                               int frames) {
+  dtProcessDirection(inputBufferInterleaved, outputBufferInterleaved, frames, debugTonePhaseUpstream, DEBUG_TONE_UPSTREAM);
 }
 
-inline void moduleLoopDownstream(int16_t* inputBuffer,
-                                 int16_t* outputBuffer,
-                                 int samplesLength) {
-  dtProcessDirection(inputBuffer, outputBuffer, samplesLength, debugTonePhaseDownstream, DEBUG_TONE_DOWNSTREAM);
+inline void moduleLoopDownstream(int16_t* inputBufferInterleaved,
+                                 int16_t* outputBufferInterleaved,
+                                 int frames) {
+  dtProcessDirection(inputBufferInterleaved, outputBufferInterleaved, frames, debugTonePhaseDownstream, DEBUG_TONE_DOWNSTREAM);
 }
 
 #endif // MODULE_DEBUG_TONE_H
