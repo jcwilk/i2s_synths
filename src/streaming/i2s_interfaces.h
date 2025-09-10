@@ -7,6 +7,7 @@
 #include <driver/i2s_common.h>
 #include "../config/constants.h"
 #include "i2s_output.h"
+#include "i2s_input.h"
 
 // Upstream/Downstream I2S channel handles
 static i2s_chan_handle_t i2s_tx_u = NULL;
@@ -16,6 +17,7 @@ static i2s_chan_handle_t i2s_rx_d = NULL;
 
 // Event counters/flags
 static I2SOutputState i2s_output_state = { 0, 0, false, false, 0, NULL, NULL };
+static I2SInputState i2s_input_state = { false, false, NULL };
 
 // Rotating TX buffer state for simple generator
 #define SINE_NUM_BUFFERS 4
@@ -23,6 +25,7 @@ static I2SOutputState i2s_output_state = { 0, 0, false, false, 0, NULL, NULL };
 static float sine_phase = 0.0f;
 static int16_t sine_buffers[SINE_NUM_BUFFERS][BUFFER_LEN];
 static int sine_buffer_index = 0;
+static int16_t rx_sink_buffer[BUFFER_LEN]; // throwaway RX buffer for gating
 
 // TX sent callback now owned/registered by i2s_output module
 
@@ -39,26 +42,26 @@ static inline void generateSineBuffer(int16_t* buffer, int frames, float frequen
   }
 }
 
-static inline void refillTxBuffersWithSine() {
+static inline void writeSineBufferWhenRxReady() {
+  const size_t fullBytes = sizeof(sine_buffers[0]);
+  I2SInputReadOutcome r = i2s_input_read(i2s_input_state, rx_sink_buffer, fullBytes);
+  i2s_input_state = r.state;
+  if (r.result != I2S_INPUT_READ_OK) {
+    return; // no RX data available; don't transmit
+  }
   const int framesPerBuf = BUFFER_LEN / 2;
-  while (i2s_output_can_queue(i2s_output_state)) {
-    int16_t* buf = sine_buffers[sine_buffer_index];
-    generateSineBuffer(buf, framesPerBuf, 440.0f, 8000.0f);
-    I2SOutputWriteOutcome w = i2s_output_write(i2s_output_state, i2s_tx_u, buf, sizeof(sine_buffers[0]));
-    i2s_output_state = w.state;
-    if (w.result == I2S_OUTPUT_WRITE_OK) {
-      sine_buffer_index = (sine_buffer_index + 1) % SINE_NUM_BUFFERS;
-    } else if (w.result == I2S_OUTPUT_WRITE_TIMEOUT) {
-      break;
-    } else {
-      // Error already reflected in state by wrapper
-      break;
-    }
+  int16_t* buf = sine_buffers[sine_buffer_index];
+  generateSineBuffer(buf, framesPerBuf, 440.0f, 8000.0f);
+  I2SOutputWriteOutcome w = i2s_output_write(i2s_output_state, i2s_tx_u, buf, sizeof(sine_buffers[0]));
+  i2s_output_state = w.state;
+  if (w.result == I2S_OUTPUT_WRITE_OK) {
+    sine_buffer_index = (sine_buffer_index + 1) % SINE_NUM_BUFFERS;
   }
 }
 
 static inline void refillTxBuffersWithSilence() {
-  while (i2s_output_can_queue(i2s_output_state)) {
+  const int maxQueued = (int)(I2S_DMA_BUF_COUNT / 2);
+  while (i2s_output_can_queue(i2s_output_state) && i2s_output_state.tx_buffers_queued < maxQueued) {
     int16_t* sbuf = sine_buffers[sine_buffer_index];
     memset(sbuf, 0, sizeof(sine_buffers[0]));
     I2SOutputWriteOutcome w = i2s_output_write(i2s_output_state, i2s_tx_u, sbuf, sizeof(sine_buffers[0]));
@@ -155,6 +158,8 @@ static inline void setupI2SD() {
   };
   if (!setupI2SOverlap(I2SD_PORT, I2S_ROLE_MASTER, gpio_cfg, i2s_tx_d, i2s_rx_d, true)) return;
 
+  i2s_input_state = i2s_input_make_initial(i2s_rx_d);
+
   i2s_channel_enable(i2s_tx_d);
   i2s_channel_enable(i2s_rx_d);
   
@@ -180,7 +185,7 @@ static inline void i2sLoop(bool inStartupMute) {
     refillTxBuffersWithSilence();
     return;
   }
-  refillTxBuffersWithSine();
+  writeSineBufferWhenRxReady();
 }
 
 #endif // I2S_INTERFACES_H
