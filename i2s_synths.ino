@@ -24,15 +24,15 @@ void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int sampl
 
 // Include the selected audio processing module header when needed
 #if ACTIVE_MODULE == MODULE_MERGER
-#include "src/modules/merger/merger.h"
+#include "src/modules/merger.h"
 #elif ACTIVE_MODULE == MODULE_DEBUG_TONE
-#include "src/modules/debug_tone/debug_tone.h"
+#include "src/modules/debug_tone.h"
 #elif ACTIVE_MODULE == MODULE_DELAY
-#include "src/modules/delay/delay.h"
+#include "src/modules/delay.h"
 #elif ACTIVE_MODULE == MODULE_CUTOFF
-#include "src/modules/cutoff/cutoff.h"
+#include "src/modules/cutoff.h"
 #elif ACTIVE_MODULE == MODULE_PASSTHROUGH
-#include "src/modules/passthrough/passthrough.h"
+#include "src/modules/passthrough.h"
 #endif
 
 unsigned long startup_time = 0;

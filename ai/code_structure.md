@@ -16,10 +16,10 @@ MyProject/
 ├── MyProject.ino
 └── src/
     ├── modules/
-    │   └── some_module_name/
-    │       └── some_module_name.h
+    │   └── some_module_name.h
     ├── feature_area_a/
-    │   └── some_header.h
+    │   ├── component_one.h
+    │   └── component_two.h
     └── feature_area_b/
         └── another_header.h
 ```
@@ -27,7 +27,8 @@ MyProject/
 **Notes**
 
 * `src/modules/` is **reserved** for audio processing modules (see §4).
-* Other folders are placeholders—name them to match function (e.g., `sensors`, `i2s`, `ui`, `hw`).
+* Organize other folders by category/concept (e.g., `streaming`, `ui`, `hw`, `input`) and place headers directly under the category.
+* Avoid redundant single‑file subfolders that merely mirror a header name. Prefer `category/thing.h` over `category/thing/thing.h`.
 
 ---
 
@@ -69,7 +70,8 @@ public:
 
 **Location & naming**
 
-* Each module resides at: `src/modules/<name>/<name>.h`.
+* Prefer flat headers: `src/modules/<name>.h`.
+* If a module spans multiple headers or needs supporting files, use a folder: `src/modules/<name>/...`.
 
 **Selection model**
 
@@ -79,7 +81,7 @@ public:
 **Minimal module surface (template)**
 
 ```cpp
-// src/modules/some_module_name/some_module_name.h
+// src/modules/some_module_name.h
 #ifndef SOME_MODULE_NAME_H
 #define SOME_MODULE_NAME_H
 
@@ -112,7 +114,7 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
 
 ```cpp
 // Select one module by including its header:
-#include "src/modules/some_module_name/some_module_name.h"
+#include "src/modules/some_module_name.h"
 
 // The sketch provides processPath(), I2S setup, buffers, and calls:
 //   moduleSetup();
@@ -127,20 +129,21 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
 
 ---
 
-## 5) Concept‑Specific Headers (no junk drawer)
+## 5) Concept / Category Folders (no junk drawer)
 
-Instead of a global “shared utils” header, create focused, concept‑scoped headers. Modules include only the concepts they use. Prefer header‑only (see §3).
+Instead of a global “shared utils” header, create focused, concept‑scoped headers. Organize `src/` by category and place headers directly under that category; filenames do not need to repeat the folder name. Modules include only the concepts they use. Prefer header‑only (see §3).
 
 **Structure**
 
 ```
 src/
-├── concept_a/
-│   └── concept_a.h
-├── concept_b/
-│   └── concept_b.h
+├── streaming/
+│   ├── i2s_input.h
+│   └── i2s_output.h
+├── ui/
+│   └── neopixel.h
 └── modules/
-    └── <module>/<module>.h   // Processing modules (see §4)
+    └── <module>.h   // Processing modules (see §4)
 ```
 
 * If a symbol is needed by a module and not in a concept header, add it there first; do not declare it in the module header.
@@ -148,7 +151,7 @@ src/
 **Minimal concept header template**
 
 ```cpp
-// src/concept_a/concept_a.h
+// src/<category>/concept_a.h
 #ifndef CONCEPT_A_H
 #define CONCEPT_A_H
 

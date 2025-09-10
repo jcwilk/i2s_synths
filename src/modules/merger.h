@@ -3,9 +3,9 @@
 
 #include <Arduino.h>
 #include <string.h>
-#include "../../config/constants.h"
-#include "../../ui/neopixel.h"
-#include "../../input/pots.h"
+#include "../config/constants.h"
+#include "../ui/neopixel.h"
+#include "../input/pots.h"
 
 // Expect required symbols to be provided by the sketch (BUFFER_LEN, POT_PIN_PRIMARY/SECONDARY, ADC_11db)
 

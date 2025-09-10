@@ -4,8 +4,8 @@
 #include <Arduino.h>
 #include <math.h>
 #include <string.h>
-#include "../../config/constants.h"
-#include "../../input/pots.h"
+#include "../config/constants.h"
+#include "../input/pots.h"
 
 #ifndef DEBUG_TONE_FREQ_HZ
 #define DEBUG_TONE_FREQ_HZ 100.0f

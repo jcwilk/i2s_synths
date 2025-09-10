@@ -4,8 +4,8 @@
 #include <Arduino.h>
 #include <math.h>
 #include <string.h>
-#include "../../config/constants.h"
-#include "../../input/pots.h"
+#include "../config/constants.h"
+#include "../input/pots.h"
 
 // Delay buffer configuration
 #ifndef DELAY_SAMPLES

@@ -4,8 +4,8 @@
 #include <Arduino.h>
 #include <math.h>
 #include <string.h>
-#include "../../config/constants.h"
-#include "../../input/pots.h"
+#include "../config/constants.h"
+#include "../input/pots.h"
 
 static float cutoffEmaPrimary = 0.0f;
 static float cutoffEmaSecondary = 0.0f;

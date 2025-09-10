@@ -60,7 +60,7 @@ See [AI_INSTRUCTIONS.md](./AI_INSTRUCTIONS.md) for instructions for ai coding ag
   - Active module selection via `ACTIVE_MODULE` (default set here)
   - Gateway or not via `ENABLE_GATEWAY`
 
-- **Audio modules**: `src/modules/<name>/<name>.h` (header‑only)
+- **Audio modules**: `src/modules/<name>.h` (header‑only preferred; use a folder only if a module spans multiple files)
   - Current modules: `merger`, `debug_tone`, `delay`, `cutoff`
   - Each provides `moduleSetup`, `moduleLoopUpstream`, `moduleLoopDownstream`
   - The active one is included conditionally in `synths.ino` based on `ACTIVE_MODULE`
@@ -78,7 +78,7 @@ See [AI_INSTRUCTIONS.md](./AI_INSTRUCTIONS.md) for instructions for ai coding ag
 
 Reading tips:
 - Start at `synths.ino` → find the two calls to `processPath(...)` inside `loop()` to see dataflow
-- Jump to the active module header in `src/modules/...` for the actual DSP
+- Jump to the active module header in `src/modules/<name>.h` for the actual DSP
 - Check `src/config/constants.h` for pins/buffer sizes/sample rate when reasoning about timing or capacity
 
 ### Hardware Design and Pinouts
