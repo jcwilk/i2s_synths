@@ -6,6 +6,7 @@
 #include <driver/i2s_std.h>
 #include <driver/i2s_common.h>
 #include "../config/constants.h"
+#include "i2s_output.h"
 
 // Upstream/Downstream I2S channel handles
 static i2s_chan_handle_t i2s_tx_u = NULL;
@@ -14,11 +15,7 @@ static i2s_chan_handle_t i2s_tx_d = NULL;
 static i2s_chan_handle_t i2s_rx_d = NULL;
 
 // Event counters/flags
-static volatile uint32_t i2s_rx_ready_count = 0;
-static volatile int tx_buffers_queued = 0;
-static volatile int tx_buffers_sent = 0;
-static volatile bool tx_underrun = false;
-static volatile bool tx_overrun = false;
+static I2SOutputState i2s_output_state = { 0, 0, false, false, 0, NULL, NULL };
 
 // Rotating TX buffer state for simple generator
 #define SINE_NUM_BUFFERS 4
@@ -27,18 +24,7 @@ static float sine_phase = 0.0f;
 static int16_t sine_buffers[SINE_NUM_BUFFERS][BUFFER_LEN];
 static int sine_buffer_index = 0;
 
-static bool IRAM_ATTR on_rx_recv_callback(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_data) {
-  (void)handle; (void)event; (void)user_data;
-  i2s_rx_ready_count++;
-  return false;
-}
-
-static bool IRAM_ATTR on_tx_sent_callback(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_data) {
-  (void)handle; (void)event; (void)user_data;
-  tx_buffers_sent++;
-  if (tx_buffers_queued > 0) tx_buffers_queued--; else tx_underrun = true;
-  return false;
-}
+// TX sent callback now owned/registered by i2s_output module
 
 static inline void generateSineBuffer(int16_t* buffer, int frames, float frequency, float amplitude) {
   const float sampleRate = (float)SAMPLE_RATE;
@@ -55,36 +41,34 @@ static inline void generateSineBuffer(int16_t* buffer, int frames, float frequen
 
 static inline void refillTxBuffersWithSine() {
   const int framesPerBuf = BUFFER_LEN / 2;
-  while (tx_buffers_queued < SINE_TARGET_BUFFER_DEPTH) {
+  while (i2s_output_can_queue(i2s_output_state)) {
     int16_t* buf = sine_buffers[sine_buffer_index];
     generateSineBuffer(buf, framesPerBuf, 440.0f, 8000.0f);
-    size_t bytesWritten = 0;
-    esp_err_t res = i2s_channel_write(i2s_tx_u, buf, sizeof(sine_buffers[0]), &bytesWritten, 0);
-    if (res == ESP_OK && bytesWritten == sizeof(sine_buffers[0])) {
-      tx_buffers_queued++;
+    I2SOutputWriteOutcome w = i2s_output_write(i2s_output_state, i2s_tx_u, buf, sizeof(sine_buffers[0]));
+    i2s_output_state = w.state;
+    if (w.result == I2S_OUTPUT_WRITE_OK) {
       sine_buffer_index = (sine_buffer_index + 1) % SINE_NUM_BUFFERS;
-    } else if (res == ESP_ERR_TIMEOUT) {
+    } else if (w.result == I2S_OUTPUT_WRITE_TIMEOUT) {
       break;
     } else {
-      tx_overrun = true;
+      // Error already reflected in state by wrapper
       break;
     }
   }
 }
 
 static inline void refillTxBuffersWithSilence() {
-  while (tx_buffers_queued < SINE_TARGET_BUFFER_DEPTH) {
+  while (i2s_output_can_queue(i2s_output_state)) {
     int16_t* sbuf = sine_buffers[sine_buffer_index];
     memset(sbuf, 0, sizeof(sine_buffers[0]));
-    size_t bytesWritten = 0;
-    esp_err_t res = i2s_channel_write(i2s_tx_u, sbuf, sizeof(sine_buffers[0]), &bytesWritten, 0);
-    if (res == ESP_OK && bytesWritten == sizeof(sine_buffers[0])) {
-      tx_buffers_queued++;
+    I2SOutputWriteOutcome w = i2s_output_write(i2s_output_state, i2s_tx_u, sbuf, sizeof(sine_buffers[0]));
+    i2s_output_state = w.state;
+    if (w.result == I2S_OUTPUT_WRITE_OK) {
       sine_buffer_index = (sine_buffer_index + 1) % SINE_NUM_BUFFERS;
-    } else if (res == ESP_ERR_TIMEOUT) {
+    } else if (w.result == I2S_OUTPUT_WRITE_TIMEOUT) {
       break;
     } else {
-      tx_overrun = true;
+      // Error already reflected in state by wrapper
       break;
     }
   }
@@ -93,8 +77,6 @@ static inline void refillTxBuffersWithSilence() {
 static bool setupI2SOverlap(i2s_port_t port,
                             i2s_role_t role,
                             const i2s_std_gpio_config_t& gpio_cfg,
-                            const i2s_event_callbacks_t* rx_cbs,
-                            const i2s_event_callbacks_t* tx_cbs,
                             i2s_chan_handle_t& out_tx,
                             i2s_chan_handle_t& out_rx,
                             bool preload_tx_zero) {
@@ -133,19 +115,7 @@ static bool setupI2SOverlap(i2s_port_t port,
   result = i2s_channel_init_std_mode(out_rx, &std_cfg);
   if (result != ESP_OK) { Serial.println("I2S RX init failed"); return false; }
 
-  if (rx_cbs) i2s_channel_register_event_callback(out_rx, rx_cbs, NULL);
-  if (tx_cbs) i2s_channel_register_event_callback(out_tx, tx_cbs, NULL);
 
-  if (preload_tx_zero) {
-    static int16_t zeroBuf[BUFFER_LEN] = {0};
-    size_t bytes_loaded = 0;
-    for (uint32_t i = 0; i < chan_cfg.dma_desc_num; i++) {
-      i2s_channel_preload_data(out_tx, zeroBuf, sizeof(zeroBuf), &bytes_loaded);
-    }
-  }
-
-  i2s_channel_enable(out_tx);
-  i2s_channel_enable(out_rx);
   return true;
 }
 
@@ -158,24 +128,19 @@ static inline void setupI2SU() {
     .din = (gpio_num_t)I2SU_SD_IN,
     .invert_flags = { .mclk_inv = 0, .bclk_inv = 0, .ws_inv = 0 },
   };
-  const i2s_event_callbacks_t rx_cbs = {
-    .on_recv = on_rx_recv_callback,
-    .on_recv_q_ovf = NULL,
-    .on_sent = NULL,
-    .on_send_q_ovf = NULL,
-  };
-  const i2s_event_callbacks_t tx_cbs = {
-    .on_recv = NULL,
-    .on_recv_q_ovf = NULL,
-    .on_sent = on_tx_sent_callback,
-    .on_send_q_ovf = NULL,
-  };
   #if ENABLE_GATEWAY
     const i2s_role_t role = I2S_ROLE_MASTER;
   #else
     const i2s_role_t role = I2S_ROLE_SLAVE;
   #endif
-  if (!setupI2SOverlap(I2SU_PORT, role, gpio_cfg, &rx_cbs, &tx_cbs, i2s_tx_u, i2s_rx_u, true)) return;
+  if (!setupI2SOverlap(I2SU_PORT, role, gpio_cfg, i2s_tx_u, i2s_rx_u, true)) return;
+  
+  // Initialize output state, allocating mailbox and registering callbacks
+  i2s_output_state = i2s_output_make_initial(i2s_tx_u);
+
+  i2s_channel_enable(i2s_tx_u);
+  i2s_channel_enable(i2s_rx_u);
+
   Serial.printf("I2SU ready: MCK=%d, BCK=%d, WS=%d, DOUT=%d, DIN=%d\n", I2SU_MCK, I2SU_SCK, I2SU_WS, I2SU_SD_OUT, I2SU_SD_IN);
 }
 
@@ -188,7 +153,11 @@ static inline void setupI2SD() {
     .din = (gpio_num_t)I2SD_SD_IN,
     .invert_flags = { .mclk_inv = 0, .bclk_inv = 0, .ws_inv = 0 },
   };
-  if (!setupI2SOverlap(I2SD_PORT, I2S_ROLE_MASTER, gpio_cfg, NULL, NULL, i2s_tx_d, i2s_rx_d, true)) return;
+  if (!setupI2SOverlap(I2SD_PORT, I2S_ROLE_MASTER, gpio_cfg, i2s_tx_d, i2s_rx_d, true)) return;
+
+  i2s_channel_enable(i2s_tx_d);
+  i2s_channel_enable(i2s_rx_d);
+  
   Serial.printf("I2SD ready: MCK=%d, BCK=%d, WS=%d, DOUT=%d, DIN=%d\n", I2SD_MCK, I2SD_SCK, I2SD_WS, I2SD_SD_OUT, I2SD_SD_IN);
 }
 
@@ -205,6 +174,8 @@ static inline void i2sSetup() {
 }
 
 static inline void i2sLoop(bool inStartupMute) {
+  // Sync from ISR mailbox owned by output module
+  i2s_output_state = i2s_output_sync_from_isr(i2s_output_state);
   if (inStartupMute) {
     refillTxBuffersWithSilence();
     return;

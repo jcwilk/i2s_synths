@@ -9,3 +9,5 @@ alwaysApply: true
 Always reference and follow the instructions in the project instruction file:
 
 @AI_INSTRUCTIONS.md
+
+Also make sure to read files referenced from that file, and recursively files referenced from those files, etc, if they seem at all relevant to the task at hand.

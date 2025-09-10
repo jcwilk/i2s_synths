@@ -71,6 +71,14 @@ ISR Considerations
 - Keep ISR handlers minimal; avoid blocking and large copies.
 - Prefer returning new state and assigning once at the call site.
 
+### ISR mailbox pattern (functional integration)
+- Maintain a tiny POD mailbox with `volatile` monotonic counters that ISR callbacks increment.
+- Allocate the mailbox once (e.g., on the heap during setup) and keep its pointer for the program lifetime.
+- Pass the mailbox pointer to callback registration as user data; callbacks only increment counters.
+- Avoid clearing counters from main code. Keep snapshot fields in state and compute deltas: `delta = (uint32_t)(total - seen)`.
+- Add a pure sync step each tick: `state' = applyDeltas(state, mailbox)`, applying one transition per observed event.
+- This isolates mutation to the ISR adapter, avoids stale references across the ISR boundary, and preserves pass-by-value state semantics.
+
 Fail Fast on Sanity Checks
 - Prefer explicit validation up-front and stop early if invariants are violated.
 - Example:
