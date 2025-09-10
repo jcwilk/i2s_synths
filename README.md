@@ -1,4 +1,4 @@
-# ESP32 Digital Modular Synthesizers Project v2 (pre - still WIP transitioning from v1)
+# ESP32 Digital Modular Synthesizers Project v2
 
 A project that grew out of the frustration of how expensive and tedious it is to explore hardware synthesizers.
 
@@ -87,7 +87,7 @@ See [ai/hardware.md](ai/hardware.md) for hardware details.
 
 ### Versions
 
-v2-pre - the current version under construction
+v2 - the current version, still soldering together control modules at time of writing
 * Each module only sends signals to its upstream and downstream neighbors
 * Each interface dedicated to a particular neighbor
 * Shared power rail which gets extended by each module, and drawn from for power - only the gateway needs to be powered
@@ -96,7 +96,7 @@ v2-pre - the current version under construction
 * Use an additional "master clock" clock signal which may help keep the samples more reliably transmitted
 * Replace WM8960 with Pmod I2S2 for hopefully more consistent and better documented ADC/DAC behavior
 
-v1 - the current version
+v1 - previous version for which I built a set of (poorly designed yet semi-functional) control modules
 * Each module only sends signals to its upstream and downstream neighbors
 * Each interface dedicated to a particular neighbor
 * Still no power sharing, each chip needs to be individually powered via USB-C
