@@ -7,7 +7,7 @@
 #define ADC_MAX 4095
 #endif
 #ifndef EMA_ALPHA
-#define EMA_ALPHA 0.05f
+#define EMA_ALPHA 0.01f // NB: this is very conservative due to it only checking the pot per buffer write (todo - check more often)
 #endif
 #ifndef DEAD_ZONE_LOW
 #define DEAD_ZONE_LOW 0.02f
@@ -18,7 +18,7 @@
 
 // Smooth a potentiometer reading with EMA, apply dead-zone mapping to [0..1]
 inline float readPotWithSmoothingAndDeadZone(int pin, float& emaState) {
-  float raw = 1.0f - ((float)analogRead(pin) / (float)ADC_MAX);
+  float raw = ((float)analogRead(pin) / (float)ADC_MAX);
   emaState = (EMA_ALPHA * raw) + ((1.0f - EMA_ALPHA) * emaState);
 
   if (emaState < DEAD_ZONE_LOW) {

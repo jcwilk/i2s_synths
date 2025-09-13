@@ -24,10 +24,10 @@
 // Optional override: define DEBUG_TONE_OVERRIDE_FREQ_HZ (e.g., 440)
 // to ignore potentiometers and generate a plain sine wave at that frequency.
 // Leave undefined to use pots for frequency and waveshape.
-#define DEBUG_TONE_OVERRIDE_FREQ_HZ 440
+//#define DEBUG_TONE_OVERRIDE_FREQ_HZ 440
 
 #ifndef DEBUG_TONE_UPSTREAM
-#define DEBUG_TONE_UPSTREAM 1
+#define DEBUG_TONE_UPSTREAM 0
 #endif
 #ifndef DEBUG_TONE_DOWNSTREAM
 #define DEBUG_TONE_DOWNSTREAM 1

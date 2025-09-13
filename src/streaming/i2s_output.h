@@ -62,6 +62,20 @@ static inline I2SOutputState i2s_output_make_initial(i2s_chan_handle_t tx_handle
   return s;
 }
 
+static inline I2SOutputState i2s_output_preload_silence(I2SOutputState s) {
+  if (!s.tx_handle) return s;
+  
+  const int buff_count = I2S_DMA_BUF_COUNT / 2;
+  static const int16_t zero_frame[BUFFER_LEN] = {0};
+  const size_t full_bytes = sizeof(zero_frame);
+  for (int i = 0; i < buff_count; i++) {
+    size_t bytes_loaded = 0;
+    (void)i2s_channel_preload_data(s.tx_handle, (const void*)zero_frame, full_bytes, &bytes_loaded);
+  }
+  s.tx_buffers_queued = buff_count; // start our buffer at half-full so we can write more right away
+  return s;
+}
+
 // Register callbacks and enable the TX channel. Must be called before first enable.
 static inline I2SOutputState i2s_output_finalize(I2SOutputState s) {
   if (!s.tx_handle) {
@@ -88,6 +102,9 @@ static inline I2SOutputState i2s_output_finalize(I2SOutputState s) {
     reportError("i2s_output_finalize: register callback failed");
     return s;
   }
+
+  s = i2s_output_preload_silence(s);
+  
   esp_err_t en_res = i2s_channel_enable(s.tx_handle);
   if (en_res != ESP_OK) {
     reportError("i2s_output_finalize: enable failed or already enabled");
