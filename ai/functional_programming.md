@@ -11,6 +11,11 @@ Core Patterns
 - Query helper: a function that inspects state and returns a decision (boolean/enum) without changing state.
 - Event adapter: a tiny function safe for ISR context that transforms state quickly or defers work.
 
+Avoid Pass-by-Reference for Functional State
+- Prefer pass-by-value for state structs and return the updated copy.
+- Do not use non-const references to mutate state in-place from helpers; this obscures ownership and order of effects.
+- For helpers that must produce both a new state and an immediate scalar result, accept the state by value, write the scalar to an out parameter, and return the new state.
+
 Examples (generic, not tied to project files)
 
 1) Counter with upper bound

@@ -16,13 +16,24 @@ typedef struct {
   volatile uint32_t tx_sent_total;
 } I2SOutputIsrTotals;
 
+// Mailbox (ISR-safe) for overflow/underrun event (boolean, sticky until polled)
+typedef struct {
+  volatile bool overflow_triggered;
+} I2SOutputOverflowMailbox;
+
+// Minimal user_data for ISR callbacks: holds pointers to totals and overflow mailbox
+typedef struct {
+  I2SOutputIsrTotals* totals;
+  I2SOutputOverflowMailbox* overflow_mb;
+} I2SOutputIsrUserData;
+
 typedef struct {
   int tx_buffers_queued;
   int tx_buffers_sent;
   bool tx_underrun;
   bool tx_overrun;
   uint32_t tx_sent_seen; // snapshot of ISR total
-  I2SOutputIsrTotals* isr_totals; // heap-allocated, never freed
+  I2SOutputIsrUserData* isr_ud; // heap-allocated, never freed
   i2s_chan_handle_t tx_handle;    // bound TX handle for internal use
 } I2SOutputState;
 
@@ -45,8 +56,18 @@ static inline void i2s_output_isr_on_tx_sent(I2SOutputIsrTotals* t) {
 // TX sent callback (registered by this module)
 static bool IRAM_ATTR i2s_output_tx_sent_cb(i2s_chan_handle_t handle, i2s_event_data_t* event, void* user_data) {
   (void)handle; (void)event;
-  I2SOutputIsrTotals* totals = (I2SOutputIsrTotals*)user_data;
-  if (totals) i2s_output_isr_on_tx_sent(totals);
+  I2SOutputIsrUserData* ud = (I2SOutputIsrUserData*)user_data;
+  if (ud && ud->totals) i2s_output_isr_on_tx_sent(ud->totals);
+  return false;
+}
+
+// TX send queue overflow callback (registered by this module)
+static bool IRAM_ATTR i2s_output_tx_send_q_ovf_cb(i2s_chan_handle_t handle, i2s_event_data_t* event, void* user_data) {
+  (void)handle; (void)event;
+  I2SOutputIsrUserData* ud = (I2SOutputIsrUserData*)user_data;
+  if (ud && ud->overflow_mb) {
+    ud->overflow_mb->overflow_triggered = true;
+  }
   return false;
 }
 
@@ -57,7 +78,7 @@ static inline I2SOutputState i2s_output_make_initial(i2s_chan_handle_t tx_handle
   s.tx_underrun = false;
   s.tx_overrun = false;
   s.tx_sent_seen = 0;
-  s.isr_totals = NULL;
+  s.isr_ud = NULL;
   s.tx_handle = tx_handle;
   return s;
 }
@@ -82,22 +103,40 @@ static inline I2SOutputState i2s_output_finalize(I2SOutputState s) {
     reportError("i2s_output_finalize: tx_handle not set");
     return s;
   }
-  if (!s.isr_totals) {
+  if (!s.isr_ud) {
+    s.isr_ud = (I2SOutputIsrUserData*)malloc(sizeof(I2SOutputIsrUserData));
+    if (!s.isr_ud) {
+      reportError("i2s_output_finalize: isr user_data alloc failed");
+      return s;
+    }
+    s.isr_ud->totals = NULL;
+    s.isr_ud->overflow_mb = NULL;
+  }
+  if (!s.isr_ud->totals) {
     I2SOutputIsrTotals* totals = (I2SOutputIsrTotals*)malloc(sizeof(I2SOutputIsrTotals));
     if (!totals) {
       reportError("i2s_output_finalize: totals alloc failed");
       return s;
     }
     totals->tx_sent_total = 0;
-    s.isr_totals = totals;
+    s.isr_ud->totals = totals;
+  }
+  if (!s.isr_ud->overflow_mb) {
+    I2SOutputOverflowMailbox* mb = (I2SOutputOverflowMailbox*)malloc(sizeof(I2SOutputOverflowMailbox));
+    if (!mb) {
+      reportError("i2s_output_finalize: overflow mailbox alloc failed");
+      return s;
+    }
+    mb->overflow_triggered = false;
+    s.isr_ud->overflow_mb = mb;
   }
   const i2s_event_callbacks_t tx_cbs = {
     .on_recv = NULL,
     .on_recv_q_ovf = NULL,
     .on_sent = i2s_output_tx_sent_cb,
-    .on_send_q_ovf = NULL,
+    .on_send_q_ovf = i2s_output_tx_send_q_ovf_cb,
   };
-  esp_err_t cb_res = i2s_channel_register_event_callback(s.tx_handle, &tx_cbs, (void*)s.isr_totals);
+  esp_err_t cb_res = i2s_channel_register_event_callback(s.tx_handle, &tx_cbs, (void*)s.isr_ud);
   if (cb_res != ESP_OK) {
     reportError("i2s_output_finalize: register callback failed");
     return s;
@@ -154,8 +193,22 @@ static inline I2SOutputState i2s_output_apply_tx_sent_total(I2SOutputState s, ui
 
 // Consume ISR mailbox totals into functional state
 static inline I2SOutputState i2s_output_sync_from_isr(I2SOutputState s) {
-  if (!s.isr_totals) return s;
-  return i2s_output_apply_tx_sent_total(s, s.isr_totals->tx_sent_total);
+  if (!s.isr_ud || !s.isr_ud->totals) return s;
+  return i2s_output_apply_tx_sent_total(s, s.isr_ud->totals->tx_sent_total);
+}
+
+// Poll and clear overflow/underrun event (sticky until observed). Writes result to out param.
+static inline I2SOutputState i2s_output_poll_overflow_event(I2SOutputState s, bool* outTriggered) {
+  if (!outTriggered) {
+    reportError("i2s_output_poll_overflow_event: outTriggered is NULL");
+  };
+  *outTriggered = false;
+  if (!s.isr_ud || !s.isr_ud->overflow_mb) return s;
+  if (s.isr_ud->overflow_mb->overflow_triggered) {
+    s.isr_ud->overflow_mb->overflow_triggered = false;
+    *outTriggered = true;
+  }
+  return s;
 }
 
 // Wrapper around i2s_channel_write that updates state and reports outcome

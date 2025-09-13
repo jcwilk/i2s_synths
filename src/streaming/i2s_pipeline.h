@@ -95,6 +95,13 @@ static inline I2SPipelineState i2s_pipeline_process(I2SPipelineState pipeline_st
   }
 
   pipeline_state = i2s_pipeline_sync_output(pipeline_state);
+  // Listener: flash orange on overflow/underrun event
+  bool ovf = false;
+  pipeline_state.output_state = i2s_output_poll_overflow_event(pipeline_state.output_state, &ovf);
+  if (ovf) {
+    // Keep brightness consistent with other flashes
+    neopixelSetTimedColor(25, 8, 0, 150, NEOPIXEL_MODE_HOLD);
+  }
   if (!i2s_output_can_queue(pipeline_state.output_state)) {
     return pipeline_state;
   }
