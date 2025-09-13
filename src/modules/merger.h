@@ -22,6 +22,11 @@
 #define MERGER_RING_CAPACITY_MULTIPLIER 64
 #endif
 
+// Compile-time toggle: forward downstream input to upstream output in addition to normal behavior
+#ifndef MERGER_ENABLE_DS_TO_US_FORWARD
+#define MERGER_ENABLE_DS_TO_US_FORWARD 1
+#endif
+
 // Expect the sketch to define BUFFER_LEN, POT_PIN_PRIMARY, POT_PIN_SECONDARY, and neopixel helpers
 
 // State
@@ -37,6 +42,20 @@ static uint32_t mergerRingHead = 0;         // index of oldest sample
 static uint32_t mergerRingTail = 0;         // index one past newest sample
 static uint32_t mergerRingCountSamples = 0; // number of valid samples in buffer
 static volatile bool mergerFlagOverrunEvent = false;
+
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+#ifndef MERGER_REV_RING_CAPACITY_MULTIPLIER
+#define MERGER_REV_RING_CAPACITY_MULTIPLIER MERGER_RING_CAPACITY_MULTIPLIER
+#endif
+#ifndef MERGER_REV_RING_CAPACITY
+#define MERGER_REV_RING_CAPACITY (BUFFER_LEN * MERGER_REV_RING_CAPACITY_MULTIPLIER)
+#endif
+static int16_t mergerRevRing[MERGER_REV_RING_CAPACITY];
+static uint32_t mergerRevRingHead = 0;
+static uint32_t mergerRevRingTail = 0;
+static uint32_t mergerRevRingCountSamples = 0;
+static volatile bool mergerRevFlagOverrunEvent = false;
+#endif
 
 // Ensure neopixel mode constant exists
 #ifndef NEOPIXEL_MODE_HOLD
@@ -115,6 +134,70 @@ static inline void mergerRingPrefillSilence(int count) {
   }
 }
 
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+// --- Reverse ring (downstream -> upstream) helpers ---
+static inline uint32_t mergerRevRingSpace() {
+  return (uint32_t)(MERGER_REV_RING_CAPACITY - mergerRevRingCountSamples);
+}
+
+static inline void mergerRevRingDropOldest(uint32_t dropCount) {
+  if (dropCount == 0) return;
+  if (dropCount > mergerRevRingCountSamples) dropCount = mergerRevRingCountSamples;
+  mergerRevRingHead += dropCount;
+  if (mergerRevRingHead >= MERGER_REV_RING_CAPACITY) mergerRevRingHead -= MERGER_REV_RING_CAPACITY;
+  mergerRevRingCountSamples -= dropCount;
+}
+
+static inline void mergerRevRingPushSamples(const int16_t* src, int count) {
+  if (count <= 0) return;
+  uint32_t space = mergerRevRingSpace();
+  if (space < (uint32_t)count) {
+    mergerRevFlagOverrunEvent = true;
+    uint32_t needToFree = (uint32_t)count - space;
+    mergerRevRingDropOldest(needToFree);
+  }
+
+  int first = (int)mergerMinU32((uint32_t)count, (uint32_t)(MERGER_REV_RING_CAPACITY - mergerRevRingTail));
+  memcpy(&mergerRevRing[mergerRevRingTail], src, first * sizeof(int16_t));
+  int remaining = count - first;
+  if (remaining > 0) {
+    memcpy(&mergerRevRing[0], src + first, remaining * sizeof(int16_t));
+  }
+  mergerRevRingTail += (uint32_t)count;
+  if (mergerRevRingTail >= MERGER_REV_RING_CAPACITY) mergerRevRingTail -= MERGER_REV_RING_CAPACITY;
+  mergerRevRingCountSamples += (uint32_t)count;
+}
+
+static inline int mergerRevRingPopSamples(int16_t* dst, int count) {
+  if (count <= 0) return 0;
+  int avail = (int)mergerRevRingCountSamples;
+  int toRead = avail < count ? avail : count;
+  if (toRead <= 0) return 0;
+
+  int first = (int)mergerMinU32((uint32_t)toRead, (uint32_t)(MERGER_REV_RING_CAPACITY - mergerRevRingHead));
+  memcpy(dst, &mergerRevRing[mergerRevRingHead], first * sizeof(int16_t));
+  int remaining = toRead - first;
+  if (remaining > 0) {
+    memcpy(dst + first, &mergerRevRing[0], remaining * sizeof(int16_t));
+  }
+  mergerRevRingHead += (uint32_t)toRead;
+  if (mergerRevRingHead >= MERGER_REV_RING_CAPACITY) mergerRevRingHead -= MERGER_REV_RING_CAPACITY;
+  mergerRevRingCountSamples -= (uint32_t)toRead;
+  return toRead;
+}
+
+static inline void mergerRevRingPrefillSilence(int count) {
+  if (count <= 0) return;
+  static int16_t zeros[BUFFER_LEN];
+  memset(zeros, 0, sizeof(zeros));
+  while (count > 0) {
+    int chunk = count > BUFFER_LEN ? BUFFER_LEN : count;
+    mergerRevRingPushSamples(zeros, chunk);
+    count -= chunk;
+  }
+}
+#endif
+
 // --- Module API ---
 inline void moduleSetup() {
   analogSetAttenuation(ADC_11db);
@@ -131,6 +214,13 @@ inline void moduleSetup() {
   mergerEmaSecondary = 0.0f;
 
   Serial.println("Merger module initialized");
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+  mergerRevRingHead = 0;
+  mergerRevRingTail = 0;
+  mergerRevRingCountSamples = 0;
+  mergerRevFlagOverrunEvent = false;
+  memset(mergerRevRing, 0, sizeof(mergerRevRing));
+#endif
 }
 
 inline void moduleLoopUpstream(int16_t* inputBuffer,
@@ -147,6 +237,24 @@ inline void moduleLoopUpstream(int16_t* inputBuffer,
     mergerFlagOverrunEvent = false;
     neopixelSetTimedColor(25, 0, 0, 500, NEOPIXEL_MODE_HOLD); // red flash for overrun
   }
+
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+  // Mix in any downstream input forwarded to upstream output
+  if (samplesLength > 0 && outputBuffer) {
+    static int16_t tempBuf[BUFFER_LEN];
+    int toMix = mergerRevRingPopSamples(tempBuf, samplesLength);
+    for (int i = 0; i < toMix; i++) {
+      int32_t mixed = (int32_t)outputBuffer[i] + (int32_t)tempBuf[i];
+      if (mixed > 32767) mixed = 32767;
+      if (mixed < -32768) mixed = -32768;
+      outputBuffer[i] = (int16_t)mixed;
+    }
+    // If underrun on reverse path, optionally prefill to stabilize
+    if (toMix < samplesLength) {
+      // Keep silent; stabilization will happen on downstream path if needed
+    }
+  }
+#endif
 }
 
 inline void moduleLoopDownstream(int16_t* inputBuffer,
@@ -164,6 +272,9 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
   if (secondaryCoeff > 1.10f) secondaryCoeff = 1.10f;
 
   int underrunMissing = 0;
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+  static int16_t dsForwardTemp[BUFFER_LEN];
+#endif
   for (int i = 0; i < samplesLength; i++) {
     int16_t upstreamSample = 0;
     int popped = mergerRingPopSamples(&upstreamSample, 1);
@@ -172,8 +283,8 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
       upstreamSample = 0; // substitute silence for missing upstream sample
     }
 
-    int32_t mergedSample = (int32_t)(inputBuffer ? (int32_t)inputBuffer[i] * primaryCoeff : 0) +
-                           (int32_t)((int32_t)upstreamSample * secondaryCoeff);
+    int32_t downstreamPrimary = (int32_t)(inputBuffer ? (int32_t)inputBuffer[i] * primaryCoeff : 0);
+    int32_t mergedSample = downstreamPrimary + (int32_t)((int32_t)upstreamSample * secondaryCoeff);
 
     int32_t mergedAbs = mergerAbs32(mergedSample);
     if (mergedAbs > MERGER_MAX_SIGNAL_LEVEL) {
@@ -186,6 +297,14 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
     if (mergedSample > 32767) mergedSample = 32767;
     if (mergedSample < -32768) mergedSample = -32768;
     outputBuffer[i] = (int16_t)mergedSample;
+
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+    // Forward the downstream contribution with identical gain and compressor scaling
+    int32_t fwd = (int32_t)(downstreamPrimary * mergerCurrentScaleRatio);
+    if (fwd > 32767) fwd = 32767;
+    if (fwd < -32768) fwd = -32768;
+    if (i < BUFFER_LEN) dsForwardTemp[i] = (int16_t)fwd;
+#endif
   }
 
   // If we encountered underrun, indicate and try to recover by padding buffer with silence
@@ -193,6 +312,20 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
     neopixelSetTimedColor(25, 25, 0, 500, NEOPIXEL_MODE_HOLD); // yellow flash for underrun
     mergerRingPrefillSilence(BUFFER_LEN); // add a frame of silence to help stabilize buffer
   }
+
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+  // Push the scaled/compressed downstream contribution for upstream forwarding
+  if (samplesLength > 0) {
+    int count = samplesLength > BUFFER_LEN ? BUFFER_LEN : samplesLength;
+    mergerRevRingPushSamples(dsForwardTemp, count);
+  }
+
+  // Handle any reverse overrun event resulting from enqueue
+  if (mergerRevFlagOverrunEvent) {
+    mergerRevFlagOverrunEvent = false;
+    neopixelSetTimedColor(25, 0, 0, 500, NEOPIXEL_MODE_HOLD); // red flash for overrun
+  }
+#endif
 }
 
 #endif // MODULE_MERGER_H
