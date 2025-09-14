@@ -7,9 +7,6 @@
 #include "../config/constants.h"
 #include "../input/pots.h"
 
-static float cutoffEmaPrimary = 0.0f;
-static float cutoffEmaSecondary = 0.0f;
-
 static const float CUTOFF_MIN_HZ = 200.0f;
 static const float CUTOFF_MAX_HZ = 2000.0f;
 
@@ -91,7 +88,8 @@ inline void moduleSetup() {
 
 inline void moduleLoopUpstream(int16_t* inputBuffer,
                                int16_t* outputBuffer,
-                               int samplesLength) {
+                               int samplesLength,
+                               DualPotsState /*pots_state*/) {
   if (samplesLength > 0) {
     memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
   }
@@ -99,10 +97,11 @@ inline void moduleLoopUpstream(int16_t* inputBuffer,
 
 inline void moduleLoopDownstream(int16_t* inputBuffer,
                                  int16_t* outputBuffer,
-                                 int samplesLength) {
+                                 int samplesLength,
+                                 DualPotsState pots_state) {
   if (!(samplesLength > 0)) return;
-  float pCut = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, cutoffEmaPrimary);
-  float pInt = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, cutoffEmaSecondary);
+  float pCut = potsPrimaryLinear(pots_state);
+  float pInt = potsSecondaryLinear(pots_state);
   float cutoffHz = mapPotPrimaryToCutoff(pCut);
   tptSetCutoff(cutoffHz);
   float intensity = mapPotSecondaryToBlend(pInt);

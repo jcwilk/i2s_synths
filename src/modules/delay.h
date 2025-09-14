@@ -27,7 +27,6 @@
 static int16_t delayBuffer[DELAY_SAMPLES * 2];
 static uint32_t writeIndex = 0;
 static uint32_t currentDelaySpan = DELAY_SAMPLES * 2;
-static float primaryPotEma = 0.0f;
 static float lastAppliedPot01 = -1.0f;
 static int16_t fadeTemp[2 * MAX_FADE_FRAMES];
 
@@ -51,7 +50,8 @@ inline void moduleSetup() {
 
 inline void moduleLoopUpstream(int16_t* inputBuffer,
                                int16_t* outputBuffer,
-                               int samplesLength) {
+                               int samplesLength,
+                               DualPotsState /*pots_state*/) {
   if (samplesLength > 0) {
     memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
   }
@@ -59,11 +59,12 @@ inline void moduleLoopUpstream(int16_t* inputBuffer,
 
 inline void moduleLoopDownstream(int16_t* inputBuffer,
                                  int16_t* outputBuffer,
-                                 int samplesLength) {
+                                 int samplesLength,
+                                 DualPotsState pots_state) {
   if (samplesLength <= 0) return;
   const uint32_t capacity = (uint32_t)DELAY_SAMPLES * 2u;
 
-  float pot01Raw = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, primaryPotEma);
+  float pot01Raw = potsPrimaryLinear(pots_state);
   if (lastAppliedPot01 < 0.0f) {
     lastAppliedPot01 = pot01Raw;
   } else {

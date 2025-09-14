@@ -66,7 +66,10 @@ See [AI_INSTRUCTIONS.md](./AI_INSTRUCTIONS.md) for instructions for ai coding ag
   - The active one is included conditionally in `synths.ino` based on `ACTIVE_MODULE`
 
 - **Shared inputs (potentiometers)**: `src/input/pots.h`
-  - Helper: `readPotWithSmoothingAndDeadZone(pin, emaState)` returns a smoothed 0..1 value with dead‑zone
+  - State containers: `PotState` (single), `DualPotsState` (primary/secondary)
+  - Update: `potsUpdate(state, deltaMs)` applies time‑scaled EMA smoothing
+  - Mapping helpers: `potLinear01`, `potSquared01`, `potSqrt01` and `potsPrimary*`/`potsSecondary*`
+  - The sketch owns `g_pots_state`, updates it each `loop`, and passes it into `i2sLoop`
 
 - **UI / status LED (NeoPixel)**: `src/ui/neopixel.h`
   - `neopixelSetTimedColor(r,g,b,durationMs,mode)` and `neopixelUpdate(deltaMs)` for timed effects

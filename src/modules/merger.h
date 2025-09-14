@@ -31,8 +31,6 @@
 
 // State
 static float mergerCurrentScaleRatio = 1.0f;
-static float mergerEmaPrimary = 0.0f;
-static float mergerEmaSecondary = 0.0f;
 
 #ifndef MERGER_RING_CAPACITY
 #define MERGER_RING_CAPACITY (BUFFER_LEN * MERGER_RING_CAPACITY_MULTIPLIER)
@@ -210,8 +208,6 @@ inline void moduleSetup() {
   memset(mergerRing, 0, sizeof(mergerRing));
 
   mergerCurrentScaleRatio = 1.0f;
-  mergerEmaPrimary = 0.0f;
-  mergerEmaSecondary = 0.0f;
 
   Serial.println("Merger module initialized");
 #if MERGER_ENABLE_DS_TO_US_FORWARD
@@ -225,7 +221,8 @@ inline void moduleSetup() {
 
 inline void moduleLoopUpstream(int16_t* inputBuffer,
                                int16_t* outputBuffer,
-                               int samplesLength) {
+                               int samplesLength,
+                               DualPotsState /*pots_state*/) {
   // Upstream: passthrough AND enqueue samples into ring for downstream use
   if (samplesLength > 0 && inputBuffer && outputBuffer) {
     memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
@@ -259,14 +256,15 @@ inline void moduleLoopUpstream(int16_t* inputBuffer,
 
 inline void moduleLoopDownstream(int16_t* inputBuffer,
                                  int16_t* outputBuffer,
-                                 int samplesLength) {
+                                 int samplesLength,
+                                 DualPotsState pots_state) {
   if (!(samplesLength > 0 && outputBuffer)) {
     return;
   }
 
-  // Read both potentiometers for mix control
-  float primaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, mergerEmaPrimary);
-  float secondaryCoeff = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, mergerEmaSecondary);
+  // Read both potentiometers for mix control from passed-in state
+  float primaryCoeff = potsPrimaryLinear(pots_state);
+  float secondaryCoeff = potsSecondaryLinear(pots_state);
   // Allow up to 110% gain on secondary at max to slightly boost overall volume
   secondaryCoeff *= 1.10f;
   if (secondaryCoeff > 1.10f) secondaryCoeff = 1.10f;

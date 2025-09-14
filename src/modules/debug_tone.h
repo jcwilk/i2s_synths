@@ -35,8 +35,6 @@
 
 static float debugTonePhaseUpstream = 0.0f;
 static float debugTonePhaseDownstream = 0.0f;
-static float debugToneEmaPrimary = 0.0f;
-static float debugToneEmaSecondary = 0.0f;
 
 static inline float dtMapPotToFrequency(float pot01) {
   float minF = DEBUG_TONE_MIN_FREQ_HZ;
@@ -103,7 +101,8 @@ static inline void dtProcessDirection(int16_t* inputBufferInterleaved,
                                       int16_t* outputBufferInterleaved,
                                       int samplesLength,
                                       float& phase01,
-                                      bool generateTone) {
+                                      bool generateTone,
+                                      DualPotsState pots_state) {
   if (!(samplesLength > 0 && outputBufferInterleaved)) return;
   float freqHz;
   float shape01;
@@ -112,9 +111,9 @@ static inline void dtProcessDirection(int16_t* inputBufferInterleaved,
   freqHz = (float)DEBUG_TONE_OVERRIDE_FREQ_HZ;
   shape01 = 1.0f; // sine
 #else
-  float potFreq = readPotWithSmoothingAndDeadZone(POT_PIN_PRIMARY, debugToneEmaPrimary);
-  freqHz = dtMapPotToFrequency(potFreq);
-  shape01 = readPotWithSmoothingAndDeadZone(POT_PIN_SECONDARY, debugToneEmaSecondary);
+  float potFreq01 = potsPrimaryLinear(pots_state);
+  freqHz = dtMapPotToFrequency(potFreq01);
+  shape01 = potsSecondaryLinear(pots_state);
 #endif
   const float phaseIncrement01 = freqHz / (float)SAMPLE_RATE;
   if (generateTone) {
@@ -132,14 +131,16 @@ inline void moduleSetup() {
 
 inline void moduleLoopUpstream(int16_t* inputBufferInterleaved,
                                int16_t* outputBufferInterleaved,
-                               int frames) {
-  dtProcessDirection(inputBufferInterleaved, outputBufferInterleaved, frames, debugTonePhaseUpstream, DEBUG_TONE_UPSTREAM);
+                               int frames,
+                               DualPotsState pots_state) {
+  dtProcessDirection(inputBufferInterleaved, outputBufferInterleaved, frames, debugTonePhaseUpstream, DEBUG_TONE_UPSTREAM, pots_state);
 }
 
 inline void moduleLoopDownstream(int16_t* inputBufferInterleaved,
                                  int16_t* outputBufferInterleaved,
-                                 int frames) {
-  dtProcessDirection(inputBufferInterleaved, outputBufferInterleaved, frames, debugTonePhaseDownstream, DEBUG_TONE_DOWNSTREAM);
+                                 int frames,
+                                 DualPotsState pots_state) {
+  dtProcessDirection(inputBufferInterleaved, outputBufferInterleaved, frames, debugTonePhaseDownstream, DEBUG_TONE_DOWNSTREAM, pots_state);
 }
 
 #endif // MODULE_DEBUG_TONE_H

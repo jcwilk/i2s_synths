@@ -1,4 +1,5 @@
 #include "src/config/constants.h"
+#include "src/input/pots.h"
 #include "src/streaming/i2s_interfaces.h"
 
 // Select active module by defining ACTIVE_MODULE before constants.h, or rely on its default.
@@ -19,8 +20,8 @@ int16_t rxBufferUpstream[BUFFER_LEN];     // input from I2SD → to I2SU
 int16_t txBufferUpstream[BUFFER_LEN];
 
 // Directional processing API (implemented by active module)
-void moduleLoopUpstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
-void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength);
+void moduleLoopUpstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength, DualPotsState pots_state);
+void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int samplesLength, DualPotsState pots_state);
 
 // Include the selected audio processing module header when needed
 #if ACTIVE_MODULE == MODULE_MERGER
@@ -36,10 +37,12 @@ void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int sampl
 #endif
 
 unsigned long startup_time = 0;
-static unsigned long lastLoopMs = 0;
 static unsigned long accumulatedDeltaMs = 0;
 static unsigned long baseLoopMs = 0;
 static bool startup_active = true;
+
+// Pots state is owned by the sketch and passed by value
+static DualPotsState sketch_pots_state;
 
 void setup() {
   neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
@@ -54,6 +57,9 @@ void setup() {
   // Initialize audio processing module
   moduleSetup();
 
+  // Initialize pots after module setup (ADC configured there)
+  sketch_pots_state = potsMakeInitial(POT_PIN_PRIMARY, POT_PIN_SECONDARY);
+
   Serial.println("Setup complete.");
   startup_time = millis();
 }
@@ -61,8 +67,7 @@ void setup() {
 void loop() {
   // Coherent delta time tracking for UI updates
   unsigned long nowMs = millis();
-  if (lastLoopMs == 0) {
-    lastLoopMs = nowMs;
+  if (baseLoopMs == 0) {
     baseLoopMs = nowMs;
   }
   unsigned long normalizedNow = nowMs - baseLoopMs;
@@ -79,8 +84,11 @@ void loop() {
     neopixelSetTimedColor(0, 25, 0, 200, NEOPIXEL_MODE_LINEAR);
   }
 
+  // Update potentiometers using elapsed time scaling
+  sketch_pots_state = potsUpdate(sketch_pots_state, (unsigned long)deltaMs);
+
   // Maintain I2S TX buffer depth (silence during startup, sine afterwards)
-  i2sLoop(inStartupMute);
+  i2sLoop(inStartupMute, sketch_pots_state);
 }
 
 

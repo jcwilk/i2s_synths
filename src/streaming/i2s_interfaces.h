@@ -8,6 +8,7 @@
 #include "../config/constants.h"
 #include "i2s_output.h"
 #include "i2s_input.h"
+#include "../input/pots.h"
 #include "i2s_pipeline.h"
 
 // Upstream/Downstream I2S channel handles
@@ -160,12 +161,12 @@ static inline void i2sSetup(I2SPipelineProcessFn downstream_process,
   i2s_pipeline_downstream_state = i2s_pipeline_make_initial(u_states.input_state, d_states.output_state, downstream_process);
 }
 
-static inline void i2sLoop(bool inStartupMute) {
+static inline void i2sLoop(bool inStartupMute, DualPotsState pots_state) {
   if (inStartupMute) {
     return;
   }
-  i2s_pipeline_upstream_state = i2s_pipeline_process(i2s_pipeline_upstream_state);
-  i2s_pipeline_downstream_state = i2s_pipeline_process(i2s_pipeline_downstream_state);
+  i2s_pipeline_upstream_state = i2s_pipeline_process(i2s_pipeline_upstream_state, pots_state);
+  i2s_pipeline_downstream_state = i2s_pipeline_process(i2s_pipeline_downstream_state, pots_state);
 }
 
 #endif // I2S_INTERFACES_H

@@ -5,12 +5,14 @@
 #include <string.h>
 #include "../config/constants.h"
 #include "../ui/neopixel.h" // reportError
+#include "../input/pots.h"
 #include "i2s_input.h"
 #include "i2s_output.h"
 
 typedef void (*I2SPipelineProcessFn)(int16_t* in_stereo_interleaved,
                                      int16_t* out_stereo_interleaved,
-                                     int samples);
+                                     int samples,
+                                     DualPotsState pots_state);
 
 typedef struct {
   I2SInputState input_state;
@@ -44,7 +46,8 @@ static inline I2SPipelineState i2s_pipeline_make_initial(I2SInputState input_sta
 // Default passthrough if no process_fn provided
 static inline void i2s_pipeline_default_process(int16_t* in_buf,
                                                 int16_t* out_buf,
-                                                int samples) {
+                                                int samples,
+                                                DualPotsState /*pots_state*/) {
   if (!in_buf || !out_buf || samples <= 0) return;
   memcpy(out_buf, in_buf, sizeof(int16_t) * (size_t)samples);
 }
@@ -85,7 +88,8 @@ static inline I2SPipelineState i2s_pipeline_try_read(I2SPipelineState pipeline_s
 
 // Single simple error reporter; call and return early from the caller
 
-static inline I2SPipelineState i2s_pipeline_process(I2SPipelineState pipeline_state) {
+static inline I2SPipelineState i2s_pipeline_process(I2SPipelineState pipeline_state,
+                                                   DualPotsState pots_state) {
   const size_t full_bytes = sizeof(int16_t) * BUFFER_LEN;
   const int samples_per_buf = BUFFER_LEN;
   pipeline_state = i2s_pipeline_try_read(pipeline_state);
@@ -109,7 +113,8 @@ static inline I2SPipelineState i2s_pipeline_process(I2SPipelineState pipeline_st
   pipeline_state.process_callback(
     pipeline_state.last_input_buffer,
     pipeline_state.work_output_buffer,
-    samples_per_buf
+    samples_per_buf,
+    pots_state
   );
 
   I2SOutputWriteOutcome write_outcome = i2s_output_write(pipeline_state.output_state,
