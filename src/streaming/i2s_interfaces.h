@@ -163,6 +163,8 @@ static inline void i2sSetup(I2SPipelineProcessFn downstream_process,
 
 static inline void i2sLoop(bool inStartupMute, DualPotsState pots_state) {
   if (inStartupMute) {
+    i2s_pipeline_upstream_state = i2s_pipeline_process_muted(i2s_pipeline_upstream_state);
+    i2s_pipeline_downstream_state = i2s_pipeline_process_muted(i2s_pipeline_downstream_state);
     return;
   }
   i2s_pipeline_upstream_state = i2s_pipeline_process(i2s_pipeline_upstream_state, pots_state);

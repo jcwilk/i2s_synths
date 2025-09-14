@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <string.h>
+#include "../input/pots.h"
 
 inline void moduleSetup() {
   Serial.println("Passthrough module active");
@@ -10,7 +11,8 @@ inline void moduleSetup() {
 
 inline void moduleLoopDownstream(int16_t* inputBuffer,
                                  int16_t* outputBuffer,
-                                 int samplesLength) {
+                                 int samplesLength,
+                                 DualPotsState /*pots_state*/) {
   if (outputBuffer && inputBuffer && samplesLength > 0) {
     memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
   }
@@ -18,7 +20,8 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
 
 inline void moduleLoopUpstream(int16_t* inputBuffer,
                                int16_t* outputBuffer,
-                               int samplesLength) {
+                               int samplesLength,
+                               DualPotsState /*pots_state*/) {
   if (outputBuffer && inputBuffer && samplesLength > 0) {
     memcpy(outputBuffer, inputBuffer, samplesLength * sizeof(int16_t));
   }

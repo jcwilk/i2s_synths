@@ -2,6 +2,7 @@
 #define I2S_OUTPUT_H
 
 #include <stdbool.h>
+#include <Arduino.h>
 #include <driver/i2s_common.h>
 #include <stdlib.h>
 #include "../config/constants.h"
@@ -48,6 +49,12 @@ typedef struct {
   I2SOutputWriteResult result;
 } I2SOutputWriteOutcome;
 
+// Forward declaration for write helper used by preload
+static inline I2SOutputWriteOutcome i2s_output_write(I2SOutputState s,
+                                                     i2s_chan_handle_t handle,
+                                                     const void* buffer,
+                                                     size_t bytes);
+
 // Internal ISR adapter: increments mailbox counter
 static inline void i2s_output_isr_on_tx_sent(I2SOutputIsrTotals* t) {
   t->tx_sent_total++;
@@ -90,10 +97,17 @@ static inline I2SOutputState i2s_output_preload_silence(I2SOutputState s) {
   static const int16_t zero_frame[BUFFER_LEN] = {0};
   const size_t full_bytes = sizeof(zero_frame);
   for (int i = 0; i < buff_count; i++) {
-    size_t bytes_loaded = 0;
-    (void)i2s_channel_preload_data(s.tx_handle, (const void*)zero_frame, full_bytes, &bytes_loaded);
+    I2SOutputWriteOutcome write_outcome = i2s_output_write(s,
+                                                           s.tx_handle,
+                                                           (const void*)zero_frame,
+                                                           full_bytes);
+    s = write_outcome.state;
+    if (write_outcome.result == I2S_OUTPUT_WRITE_TIMEOUT) {
+      Serial.println("i2s_output_preload_silence: write timeout while preloading");
+    } else if (write_outcome.result == I2S_OUTPUT_WRITE_ERROR) {
+      Serial.println("i2s_output_preload_silence: write error while preloading");
+    }
   }
-  s.tx_buffers_queued = buff_count; // start our buffer at half-full so we can write more right away
   return s;
 }
 
@@ -141,9 +155,6 @@ static inline I2SOutputState i2s_output_finalize(I2SOutputState s) {
     reportError("i2s_output_finalize: register callback failed");
     return s;
   }
-
-  s = i2s_output_preload_silence(s);
-  
   esp_err_t en_res = i2s_channel_enable(s.tx_handle);
   if (en_res != ESP_OK) {
     reportError("i2s_output_finalize: enable failed or already enabled");

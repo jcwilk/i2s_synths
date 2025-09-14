@@ -83,9 +83,10 @@ void loop() {
     startup_active = false;
     neopixelSetTimedColor(0, 25, 0, 200, NEOPIXEL_MODE_LINEAR);
   }
-
+#if ENABLE_GATEWAY == 0
   // Update potentiometers using elapsed time scaling
   sketch_pots_state = potsUpdate(sketch_pots_state, (unsigned long)deltaMs);
+#endif
 
   // Maintain I2S TX buffer depth (silence during startup, sine afterwards)
   i2sLoop(inStartupMute, sketch_pots_state);

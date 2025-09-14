@@ -21,6 +21,7 @@ typedef struct {
   bool has_last_input;
   int16_t* work_output_buffer;   // heap-allocated, size = BUFFER_LEN samples
   I2SPipelineProcessFn process_callback;
+  bool has_started;              // set after first call to i2s_pipeline_process
 } I2SPipelineState;
 
 static inline void i2s_pipeline_error(const char* message) {
@@ -37,6 +38,7 @@ static inline I2SPipelineState i2s_pipeline_make_initial(I2SInputState input_sta
   pipeline_state.has_last_input = false;
   pipeline_state.work_output_buffer = (int16_t*)malloc(sizeof(int16_t) * BUFFER_LEN);
   pipeline_state.process_callback = process_callback;
+  pipeline_state.has_started = false;
   if (!pipeline_state.last_input_buffer || !pipeline_state.work_output_buffer) {
     reportError("i2s_pipeline_make_initial: allocation failed");
   }
@@ -92,6 +94,15 @@ static inline I2SPipelineState i2s_pipeline_process(I2SPipelineState pipeline_st
                                                    DualPotsState pots_state) {
   const size_t full_bytes = sizeof(int16_t) * BUFFER_LEN;
   const int samples_per_buf = BUFFER_LEN;
+  // Edge-trigger behavior: on the first non-muted call, half-fill TX with silence using normal writes
+  if (!pipeline_state.has_started) {
+    pipeline_state = i2s_pipeline_sync_output(pipeline_state);
+    pipeline_state.output_state = i2s_output_preload_silence(pipeline_state.output_state);
+    // Clear any lingering underrun/overrun flags
+    pipeline_state.output_state = i2s_output_clear_flags(pipeline_state.output_state);
+    pipeline_state.has_started = true;
+    // fall through into normal processing
+  }
   pipeline_state = i2s_pipeline_try_read(pipeline_state);
 
   if (!pipeline_state.has_last_input) {
@@ -131,6 +142,30 @@ static inline I2SPipelineState i2s_pipeline_process(I2SPipelineState pipeline_st
     return pipeline_state;
   }
 
+  return pipeline_state;
+}
+
+// Muted processing: drain input and output without producing or queuing audio
+static inline I2SPipelineState i2s_pipeline_process_muted(I2SPipelineState pipeline_state) {
+  const size_t full_bytes = sizeof(int16_t) * BUFFER_LEN;
+  (void)full_bytes; // not used, but kept for clarity/consistency
+  // Always attempt to read and discard input to keep RX draining
+  if (!pipeline_state.input_state.rx_handle || !pipeline_state.last_input_buffer) {
+    reportError("i2s_pipeline_process_muted: missing RX handle or input buffer");
+    return pipeline_state; // reportError is expected to halt, but return for completeness
+  }
+  I2SInputReadOutcome read_outcome = i2s_input_read(pipeline_state.input_state,
+                                                    (void*)pipeline_state.last_input_buffer,
+                                                    sizeof(int16_t) * BUFFER_LEN);
+  pipeline_state.input_state = read_outcome.state;
+  // Ensure no staged input remains during mute
+  pipeline_state.has_last_input = false;
+  // Sync output with ISR to observe sent counts and allow TX to underrun naturally
+  pipeline_state = i2s_pipeline_sync_output(pipeline_state);
+  // Optionally poll and clear overflow mailbox; ignore result
+  bool ignored = false;
+  pipeline_state.output_state = i2s_output_poll_overflow_event(pipeline_state.output_state, &ignored);
+  // Do not queue any output while muted
   return pipeline_state;
 }
 
