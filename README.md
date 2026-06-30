@@ -44,9 +44,9 @@ And then we can use a special connector at the end to connect the last module's 
 
 Because modules are arbitrarily programmable, they can tap into these two streams and redirect samples between them. For example, if in the above diagram "MODULE A" had a feature where it merged upstream samples back into downstream samples then it would form an echo/feedback loop. In other words, even though the modules physically form a linear chain, non-linear behaviors can still be induced due to the downstream/upstream paradigm.
 
-### AI Integration
+### AI integration
 
-See [AI_INSTRUCTIONS.md](./AI_INSTRUCTIONS.md) for instructions for ai coding agents.
+Coding agents should start with **[AGENTS.md](./AGENTS.md)** (workflow, preflight, and `ai/` guide index). OpenSpec slash commands and vocabulary: **[OPENSPEC_FLOW.md](./OPENSPEC_FLOW.md)**.
 
 ### Code layout (where to find things)
 
@@ -110,3 +110,7 @@ v0 - brief initial attempt
 * Have each interface dedicated to a stream direction to try to sidestep some clock domain issues, which meant both interfaces were connecting to each neighbor
 * No power sharing, each chip needs to be individually powered via USB-C
 * I quickly discovered this was begging for electrical problems, high frequency clock signals and long transmission lines with lots of stubs drawing energy from it along the line made the signal untenable after a module or two.
+
+## OpenSpec Flow
+
+This project uses [OpenSpec Flow](OPENSPEC_FLOW.md) for agent-assisted development: shape intent under `openspec/changes/`, apply via `/osf-apply-changes`, reconcile living specs on finish. See **`AGENTS.md`** for workflow discipline. Bundle version: **1.3.0**.
