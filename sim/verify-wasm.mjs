@@ -313,6 +313,55 @@ async function verifyDualPathDelay() {
   console.log('PASS dual-path delay: downstream and upstream feeds use separate one-buffer handoffs');
 }
 
+async function verifySlotOrderSwap() {
+  const passthroughA = await instantiateFactory('passthrough.js', 'passthrough.wasm');
+  const passthroughB = await instantiateFactory('passthrough.js', 'passthrough.wasm');
+  passthroughA._sim_setup();
+  passthroughB._sim_setup();
+
+  const scheduler = new ChainScheduler();
+  const silentMic = new Float32Array(BUFFER_LEN);
+
+  function firstSlotImpulsePeriod(order) {
+    scheduler.setSlots(order);
+    scheduler.setLoopbackEnabled(false);
+    let slot0Period = -1;
+    let slot1Period = -1;
+    for (let b = 0; b < 8; b++) {
+      const mic = b === 2 ? floatMicImpulse() : silentMic;
+      const { levels } = scheduler.processBuffer(mic, b === 2);
+      if (levels[0]?.in > 0.5 && slot0Period < 0) {
+        slot0Period = b;
+      }
+      if (levels[1]?.in > 0.5 && slot1Period < 0) {
+        slot1Period = b;
+      }
+    }
+    return { slot0Period, slot1Period };
+  }
+
+  const ab = firstSlotImpulsePeriod([
+    { bindings: wasmBindings(passthroughA) },
+    { bindings: wasmBindings(passthroughB) },
+  ]);
+  const ba = firstSlotImpulsePeriod([
+    { bindings: wasmBindings(passthroughB) },
+    { bindings: wasmBindings(passthroughA) },
+  ]);
+
+  if (ab.slot0Period !== 2 || ab.slot1Period !== 3) {
+    throw new Error(
+      `slot order A,B: expected impulse at slot0=2 slot1=3, got ${ab.slot0Period}/${ab.slot1Period}`,
+    );
+  }
+  if (ba.slot0Period !== 2 || ba.slot1Period !== 3) {
+    throw new Error(
+      `slot order B,A: expected impulse at slot0=2 slot1=3, got ${ba.slot0Period}/${ba.slot1Period}`,
+    );
+  }
+  console.log('PASS slot order swap: scheduler routing follows setSlots order');
+}
+
 async function main() {
   for (const name of VARIANTS) {
     await smokeProcess(name);
@@ -321,6 +370,7 @@ async function main() {
   await verifyDelay();
   await verifyDebugTone();
   await verifyDualPathDelay();
+  await verifySlotOrderSwap();
   await verifyMergerStressExport();
   await verifyMergerChainRouting();
   console.log('All WASM verification checks passed.');

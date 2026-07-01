@@ -108,6 +108,55 @@
       color: #8a95a8;
       margin-bottom: 0.5rem;
     }
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin-bottom: 0.5rem;
+    }
+    .card-header .card-title {
+      flex: 1;
+      margin-bottom: 0;
+      min-width: 0;
+    }
+    .drag-handle {
+      touch-action: none;
+      cursor: grab;
+      flex: 0 0 auto;
+      padding: 0.15rem 0.4rem;
+      border: 1px solid #444;
+      background: #252a38;
+      border-radius: 4px;
+      color: #8a95a8;
+      font-size: 1rem;
+      line-height: 1;
+      user-select: none;
+    }
+    .drag-handle:active {
+      cursor: grabbing;
+      background: #2e3548;
+    }
+    .delete-btn {
+      flex: 0 0 auto;
+      padding: 0.15rem 0.45rem;
+      border: 1px solid #5a3030;
+      background: #2a1a1a;
+      border-radius: 4px;
+      color: #c88;
+      font-size: 1.1rem;
+      line-height: 1;
+    }
+    .delete-btn:hover:not(:disabled) {
+      background: #3a2020;
+      color: #faa;
+    }
+    .unit-card.is-dragging {
+      opacity: 0.55;
+    }
+    .unit-card.is-drop-target {
+      outline: 2px dashed #5a8fd6;
+      outline-offset: 2px;
+    }
     .module-info { font-size: 0.8rem; color: #9ab; margin-top: 0.35rem; }
     .level-graphs {
       display: flex;

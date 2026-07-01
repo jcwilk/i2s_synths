@@ -72,11 +72,21 @@ npx serve sim -p 8765
 Open [http://localhost:8765/host/](http://localhost:8765/host/).
 
 1. **Gateway** (left card): toggle microphone, start/stop audio.
-2. **Processing units**: module type dropdown (all five kinds), primary/secondary pot sliders, In/Out level graphs.
+2. **Processing units**: module type dropdown (all five kinds), primary/secondary pot sliders, In/Out level graphs. Each card header has a **drag handle** (⠿) for reorder and a **delete** button (×).
 3. **Add unit**: append a card to the right (disabled at eight units).
-4. **Loopback** (rightmost unit only): when enabled, that unit's upstream input receives its prior downstream output; default off.
+4. **Delete unit**: remove a card via × in the header. Disabled on the sole remaining unit while audio is running; when stopped, you may delete down to zero units.
+5. **Reorder units**: drag a unit card by its handle to a new position among other unit cards. The gateway card stays fixed. Sliders and selectors do not initiate reorder.
+6. **Loopback** (rightmost unit only): when enabled, that unit's upstream input receives its prior downstream output; default off.
 
 Initial load includes gateway plus one delay unit.
+
+## Structural reconfiguration and audio rebuild
+
+These operator actions are **structural reconfiguration**: add unit, delete unit, reorder units, change module type, toggle loopback on the rightmost unit. When audio is **running**, each structural edit briefly stops output, clears level histories and playback buffers, re-syncs the chain scheduler (including path delay state), and **auto-restarts** audio while preserving the microphone toggle and pot slider positions. The status line shows “Restarting audio…” during rebuild; failures surface there with a prompt to tap Start again.
+
+**Pot slider** moves are **not** structural — they continue to apply live during playback without restarting audio.
+
+When audio is **stopped**, structural edits update layout and configuration only; audio does not start automatically.
 
 ## Chain wiring
 
@@ -97,7 +107,7 @@ Maximum **eight** processing units beyond the gateway (`MAX_PROCESSING_UNITS` in
 
 ## Module catalog
 
-Each unit's dropdown offers: passthrough, delay, merger, cutoff, debug tone. Changing a unit's type re-instantiates that slot's WASM and calls `sim_setup()` without restarting the audio engine. Pot smoothed values reset to current slider positions on type change.
+Each unit's dropdown offers: passthrough, delay, merger, cutoff, debug tone. Changing a unit's type re-instantiates that slot's WASM and calls `sim_setup()`. When audio is running, module type change triggers a full audio rebuild (see Structural reconfiguration above). Pot smoothed values reset to current slider positions on type change.
 
 ## Pot controls (firmware-equivalent EMA)
 
@@ -118,7 +128,7 @@ Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s 
 |------|------------------|--------------|
 | Startup mute | Not modeled (~1 s silence on device boot) | Phase 2 |
 | Render quantum | Web Audio 128-frame render quantum vs 512-sample firmware buffer (no internal ring) | Phase 2 |
-| Remove unit | Add-only chain | Future UX |
+| Undo/redo | Delete and reorder are immediate | Future UX |
 | Tooling | Shell build + manual serve | Phase 3 npm/CI |
 | Gateway module | I/O shim only | Optional Phase 2 |
 
@@ -132,7 +142,11 @@ Merger cross-path timing uses decoupled per-path delay state in the chain host (
 | **Delay with loopback** | Single delay unit, enable loopback on rightmost card, mic on — audible repeats; primary pot changes delay time as smoothed value settles. |
 | **Multi-unit mix** | Chain passthrough → merger (or cutoff) → delay; confirm distinct processing per slot and downstream propagation left-to-right. |
 | **Merger loopback latency** | Chain passthrough → merger → delay with loopback on the delay unit; mic on. Confirm merge latency and feedback strength feel stable as pots settle; merger card may flash Underrun while rings fill, then steady state. Secondary pot high should emphasize delayed upstream blend on merger downstream output. |
-| **Module type swap mid-playback** | Start audio, change one unit from passthrough to debug tone — tone appears without stopping/restarting audio; other units unaffected. |
+| **Module type swap mid-playback** | Start audio, change one unit from passthrough to debug tone — audio briefly stops and resumes with the new module active; level histories clear during rebuild. |
+| **Delete unit** | Add 2–3 units, start audio, delete the middle unit — card disappears, labels renumber, audio auto-restarts on remaining units. Delete on sole unit is disabled while running. |
+| **Reorder units** | Add passthrough then debug tone, start audio, drag debug tone left of passthrough via handle — audible order follows new layout after rebuild. |
+| **Pot live during playback** | Start audio, move primary pot — output changes without stop/rebuild. |
+| **Touch reorder QA** | On iOS Safari and Android Chrome: drag handle reorders units without scrolling the page; sliders and module selector do not reorder. |
 
 ## Automated acceptance
 
@@ -147,5 +161,7 @@ Merger cross-path timing uses decoupled per-path delay state in the chain host (
 | Merger stress export | `verify-wasm.mjs`: harness underrun/overrun flags from compiled merger |
 | Pot EMA | `pot-simulator.js` mirrors `pots.h`; per-unit poll in `main.js` |
 | Chain length cap | `MAX_PROCESSING_UNITS = 8`; Add unit disabled at cap |
+| Slot order swap | `verify-wasm.mjs`: scheduler slot reorder changes first-hop impulse routing |
+| Delete/reorder DOM | Manual browser check (see acceptance matrix); handle uses `touch-action: none` |
 
 **Manual browser check:** Run the acceptance matrix above on [http://localhost:8765/host/](http://localhost:8765/host/) with `./sim/build-wasm.sh` completed first.

@@ -48,8 +48,9 @@ let potPollTimer = null;
 let lastPotPollMs = 0;
 let potDragRafId = null;
 let potDragPointers = 0;
-/** @type {LevelGraphSampler[]} */
-const levelSamplers = [];
+let rebuildInProgress = false;
+/** @type {ProcessingUnit | null} */
+let draggedUnit = null;
 
 /**
  * Emscripten MODULARIZE builds expose createSimModule.
@@ -139,6 +140,81 @@ function updateLoopbackVisibility() {
   syncBindingsToScheduler();
 }
 
+function refreshUnitLabels() {
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    unit.index = i;
+    unit.titleEl.textContent = `Unit ${i + 1}`;
+    unit.dragHandle.setAttribute('aria-label', `Drag to reorder unit ${i + 1}`);
+    unit.deleteBtn.setAttribute('aria-label', `Delete unit ${i + 1}`);
+    const loopbackId = `loopback-u${i}`;
+    unit.loopbackCheckbox.id = loopbackId;
+    unit.loopbackLabel.setAttribute('for', loopbackId);
+    const canvases = unit.levelGraphsContainer.querySelectorAll('.level-graph');
+    for (let g = 0; g < canvases.length && g < LEVEL_GRAPH_SPEEDS.length; g++) {
+      canvases[g].setAttribute(
+        'aria-label',
+        `Unit ${i + 1} level graph ${LEVEL_GRAPH_SPEEDS[g].title}, blue in orange out`,
+      );
+    }
+  }
+}
+
+function refreshDomOrder() {
+  for (const unit of units) {
+    ui.unitsContainer.appendChild(unit.card);
+  }
+}
+
+function updateDeleteButtonStates() {
+  const blockSoleDelete = engine.running && units.length <= 1;
+  for (const unit of units) {
+    unit.deleteBtn.disabled = blockSoleDelete;
+  }
+}
+
+async function rebuildAudioIfRunning() {
+  syncBindingsToScheduler();
+
+  if (!engine.running) {
+    updateDeleteButtonStates();
+    return;
+  }
+
+  if (rebuildInProgress) {
+    return;
+  }
+
+  rebuildInProgress = true;
+  const micWasEnabled = ui.micToggle.checked;
+  ui.status.textContent = 'Restarting audio…';
+
+  try {
+    for (const unit of units) {
+      unit.levelSampler.stop();
+      unit.clearLevelGraphs();
+    }
+    await engine.stop();
+    syncBindingsToScheduler();
+    scheduler.resetPathDelayState();
+
+    await engine.start();
+    engine.setMicEnabled(micWasEnabled);
+    for (const unit of units) {
+      unit.levelSampler.start();
+    }
+    ui.startBtn.textContent = 'Stop audio';
+    ui.status.textContent = 'Audio running at 44100 Hz';
+  } catch (err) {
+    ui.startBtn.textContent = 'Start audio';
+    ui.status.textContent =
+      `Audio restart failed: ${err.message} — tap Start to try again`;
+  } finally {
+    rebuildInProgress = false;
+    updateDeleteButtonStates();
+  }
+}
+
 class ProcessingUnit {
   constructor(index, moduleKey = 'delay') {
     this.index = index;
@@ -152,8 +228,13 @@ class ProcessingUnit {
 
     this.card = document.createElement('div');
     this.card.className = 'chain-card unit-card';
+    this.card.dataset.unitKey = String(index);
     this.card.innerHTML = `
-      <div class="card-title">Unit ${index + 1}</div>
+      <div class="card-header row">
+        <span class="drag-handle" role="button" tabindex="0" aria-label="Drag to reorder unit ${index + 1}" title="Drag to reorder">⠿</span>
+        <div class="card-title">Unit ${index + 1}</div>
+        <button type="button" class="delete-btn" aria-label="Delete unit ${index + 1}" title="Delete unit">×</button>
+      </div>
       <div class="card-controls">
         <label>Module type</label>
         <select class="module-select"></select>
@@ -170,7 +251,7 @@ class ProcessingUnit {
         <div class="loopback-slot">
           <div class="loopback-row row">
             <input class="loopback-toggle" type="checkbox" id="loopback-u${index}" />
-            <label for="loopback-u${index}" style="margin:0;">Loopback</label>
+            <label class="loopback-label" for="loopback-u${index}" style="margin:0;">Loopback</label>
           </div>
         </div>
         <div class="stress-badge" hidden aria-live="polite"></div>
@@ -179,6 +260,9 @@ class ProcessingUnit {
       <div class="level-graphs"></div>
     `;
 
+    this.titleEl = this.card.querySelector('.card-title');
+    this.dragHandle = this.card.querySelector('.drag-handle');
+    this.deleteBtn = this.card.querySelector('.delete-btn');
     this.moduleSelect = this.card.querySelector('.module-select');
     this.primaryPot = this.card.querySelector('.primary-pot');
     this.secondaryPot = this.card.querySelector('.secondary-pot');
@@ -186,6 +270,7 @@ class ProcessingUnit {
     this.secondaryValue = this.card.querySelector('.secondary-value');
     this.loopbackRow = this.card.querySelector('.loopback-row');
     this.loopbackCheckbox = this.card.querySelector('.loopback-toggle');
+    this.loopbackLabel = this.card.querySelector('.loopback-label');
     this.stressBadge = this.card.querySelector('.stress-badge');
     this.moduleInfo = this.card.querySelector('.module-info');
     this.levelGraphsContainer = this.card.querySelector('.level-graphs');
@@ -208,7 +293,6 @@ class ProcessingUnit {
       );
     }
     this.levelSampler = new LevelGraphSampler(this.levelGraphs);
-    levelSamplers.push(this.levelSampler);
 
     for (const key of MODULE_KEYS) {
       const opt = document.createElement('option');
@@ -229,7 +313,18 @@ class ProcessingUnit {
     this.loopbackCheckbox.addEventListener('change', () => {
       this.loopbackEnabled = this.loopbackCheckbox.checked;
       syncBindingsToScheduler();
+      rebuildAudioIfRunning().catch((err) => {
+        ui.status.textContent = `Audio rebuild failed: ${err.message}`;
+      });
     });
+
+    this.deleteBtn.addEventListener('click', () => {
+      deleteUnit(this).catch((err) => {
+        ui.status.textContent = `Delete failed: ${err.message}`;
+      });
+    });
+
+    setupUnitDragDrop(this);
 
     bindPotSlider(this.primaryPot, () => this.syncPotTargets());
     bindPotSlider(this.secondaryPot, () => this.syncPotTargets());
@@ -330,7 +425,10 @@ class ProcessingUnit {
       return;
     }
     await this.loadModule(moduleKey);
-    ui.status.textContent = `${MODULES[moduleKey].label} ready on unit ${this.index + 1}`;
+    await rebuildAudioIfRunning();
+    if (!engine.running) {
+      ui.status.textContent = `${MODULES[moduleKey].label} ready on unit ${this.index + 1}`;
+    }
   }
 
   clearLevelGraphs() {
@@ -347,14 +445,104 @@ class ProcessingUnit {
 
   destroy() {
     this.levelSampler.stop();
-    const idx = levelSamplers.indexOf(this.levelSampler);
-    if (idx >= 0) {
-      levelSamplers.splice(idx, 1);
-    }
     for (const graph of this.levelGraphs) {
       graph.destroy();
     }
     this.card.remove();
+  }
+}
+
+function setupUnitDragDrop(unit) {
+  unit.card.draggable = false;
+
+  unit.dragHandle.addEventListener('pointerdown', () => {
+    unit.card.draggable = true;
+  });
+  unit.dragHandle.addEventListener('pointerup', () => {
+    if (!unit.card.classList.contains('is-dragging')) {
+      unit.card.draggable = false;
+    }
+  });
+  unit.dragHandle.addEventListener('pointercancel', () => {
+    if (!unit.card.classList.contains('is-dragging')) {
+      unit.card.draggable = false;
+    }
+  });
+
+  unit.card.addEventListener('dragstart', (event) => {
+    draggedUnit = unit;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(unit.index));
+    unit.card.classList.add('is-dragging');
+  });
+
+  unit.card.addEventListener('dragend', () => {
+    unit.card.draggable = false;
+    unit.card.classList.remove('is-dragging');
+    draggedUnit = null;
+    for (const u of units) {
+      u.card.classList.remove('is-drop-target');
+    }
+  });
+
+  unit.card.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    if (draggedUnit && draggedUnit !== unit) {
+      unit.card.classList.add('is-drop-target');
+    }
+  });
+
+  unit.card.addEventListener('dragleave', () => {
+    unit.card.classList.remove('is-drop-target');
+  });
+
+  unit.card.addEventListener('drop', (event) => {
+    event.preventDefault();
+    unit.card.classList.remove('is-drop-target');
+    if (!draggedUnit || draggedUnit === unit) {
+      return;
+    }
+
+    const fromIdx = units.indexOf(draggedUnit);
+    const toIdx = units.indexOf(unit);
+    if (fromIdx < 0 || toIdx < 0) {
+      return;
+    }
+
+    units.splice(fromIdx, 1);
+    units.splice(toIdx, 0, draggedUnit);
+
+    refreshUnitLabels();
+    refreshDomOrder();
+    updateLoopbackVisibility();
+    rebuildAudioIfRunning().catch((err) => {
+      ui.status.textContent = `Reorder rebuild failed: ${err.message}`;
+    });
+  });
+}
+
+async function deleteUnit(unit) {
+  const idx = units.indexOf(unit);
+  if (idx < 0) {
+    return;
+  }
+  if (engine.running && units.length <= 1) {
+    return;
+  }
+
+  unit.destroy();
+  units.splice(idx, 1);
+  refreshUnitLabels();
+  refreshDomOrder();
+  updateUnitCountHint();
+  updateLoopbackVisibility();
+  await rebuildAudioIfRunning();
+  if (!engine.running) {
+    ui.status.textContent =
+      units.length === 0
+        ? 'All units removed — add a unit to start audio'
+        : `Unit removed — ${units.length} processing unit(s) in chain`;
   }
 }
 
@@ -445,14 +633,19 @@ async function addUnit(moduleKey = 'delay') {
   unit.resizeLevelGraphs();
   updateUnitCountHint();
   updateLoopbackVisibility();
+  updateDeleteButtonStates();
   await unit.loadModule(moduleKey);
   startPotPoller();
+  await rebuildAudioIfRunning();
+  if (!engine.running) {
+    ui.status.textContent = `${MODULES[moduleKey].label} added — ${units.length} unit(s) in chain`;
+  }
 }
 
 engine.onLevels = (levels) => {
   for (let i = 0; i < units.length; i++) {
     if (levels[i]) {
-      levelSamplers[i]?.feed(levels[i]);
+      units[i].levelSampler?.feed(levels[i]);
       if (levels[i].stress) {
         units[i].showMergerStress(levels[i].stress);
       }
@@ -462,14 +655,15 @@ engine.onLevels = (levels) => {
 
 async function onStartClick() {
   if (engine.running) {
-    for (const sampler of levelSamplers) {
-      sampler.stop();
+    for (const unit of units) {
+      unit.levelSampler.stop();
     }
     await engine.stop();
     ui.startBtn.textContent = 'Start audio';
     for (const unit of units) {
       unit.clearLevelGraphs();
     }
+    updateDeleteButtonStates();
     return;
   }
 
@@ -483,10 +677,11 @@ async function onStartClick() {
     syncBindingsToScheduler();
     await engine.start();
     engine.setMicEnabled(ui.micToggle.checked);
-    for (const sampler of levelSamplers) {
-      sampler.start();
+    for (const unit of units) {
+      unit.levelSampler.start();
     }
     ui.startBtn.textContent = 'Stop audio';
+    updateDeleteButtonStates();
     const rightmost = units[units.length - 1];
     if (rightmost && !rightmost.loopbackEnabled) {
       ui.status.textContent +=
@@ -517,6 +712,7 @@ ui.addUnitBtn.addEventListener('click', () => {
 
 addUnit('delay')
   .then(() => {
+    updateDeleteButtonStates();
     ui.status.textContent = 'Chain ready — gateway plus one unit loaded';
   })
   .catch((err) => {
@@ -524,3 +720,4 @@ addUnit('delay')
   });
 
 updateUnitCountHint();
+updateDeleteButtonStates();
