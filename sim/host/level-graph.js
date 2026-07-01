@@ -59,6 +59,11 @@ export function linearToDisplay(linear, scaleTopLinear) {
   return Math.max(0, Math.min(1, (db - DB_FLOOR) / span));
 }
 
+function plotPadding(dpr) {
+  const edge = Math.round(3 * dpr);
+  return { top: edge, bottom: edge, left: edge, right: edge };
+}
+
 function peakInHistories(histories, channels) {
   let peak = 0;
   for (const ch of channels) {
@@ -98,22 +103,30 @@ export class LevelGraph {
 
     this.ctx = canvas.getContext('2d', { alpha: false });
     this._resize = () => this.resize();
+    this._resizeObserver = new ResizeObserver(() => this.resize());
+    this._resizeObserver.observe(this.canvas);
     this.resize();
     window.addEventListener('resize', this._resize);
   }
 
   destroy() {
+    this._resizeObserver.disconnect();
     window.removeEventListener('resize', this._resize);
   }
 
   resize() {
     const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(rect.width * dpr));
     const h = Math.max(1, Math.round(rect.height * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
+      this.pixelCols = null;
+      this.pixelColsWidth = 0;
       this.draw();
     }
   }
@@ -121,9 +134,27 @@ export class LevelGraph {
   getPlotWInt() {
     const w = this.canvas.width;
     const dpr = window.devicePixelRatio || 1;
-    const plotLeft = Math.round(34 * dpr);
-    const plotRight = w - Math.round(6 * dpr);
-    return Math.max(1, Math.floor(plotRight - plotLeft));
+    const pad = plotPadding(dpr);
+    return Math.max(1, Math.floor(w - pad.left - pad.right));
+  }
+
+  getPlotRect() {
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const pad = plotPadding(dpr);
+    const plotLeft = pad.left;
+    const plotTop = pad.top;
+    const plotRight = w - pad.right;
+    const plotBottom = h - pad.bottom;
+    return {
+      plotLeft,
+      plotTop,
+      plotRight,
+      plotBottom,
+      plotW: plotRight - plotLeft,
+      plotH: plotBottom - plotTop,
+    };
   }
 
   resetPixelScroll(plotWInt) {
@@ -217,50 +248,27 @@ export class LevelGraph {
   }
 
   draw() {
-    const { ctx, canvas, channels, history, title } = this;
+    const { ctx, canvas, channels, history } = this;
     const w = canvas.width;
     const h = canvas.height;
-    const dpr = window.devicePixelRatio || 1;
+    const { plotLeft, plotTop, plotRight, plotBottom, plotW, plotH } = this.getPlotRect();
 
     ctx.imageSmoothingEnabled = false;
 
-    const pad = {
-      top: Math.round(10 * dpr),
-      bottom: Math.round(18 * dpr),
-      left: Math.round(34 * dpr),
-      right: Math.round(6 * dpr),
-    };
-    const plotLeft = pad.left;
-    const plotTop = pad.top;
-    const plotRight = w - pad.right;
-    const plotBottom = h - pad.bottom;
-    const plotW = plotRight - plotLeft;
-    const plotH = plotBottom - plotTop;
-
     const viewPeak = peakInHistories(history, channels);
     const scaleTopLinear = this.smoothScaleTop(viewPeak);
-    const dbTop = Math.min(0, linearToDb(scaleTopLinear));
 
     ctx.fillStyle = '#141820';
     ctx.fillRect(0, 0, w, h);
 
-    ctx.strokeStyle = '#2a3140';
+    ctx.strokeStyle = '#232a38';
     ctx.lineWidth = 1;
-    ctx.fillStyle = '#6a7488';
-    ctx.font = `${Math.round(9 * dpr)}px system-ui, sans-serif`;
-    ctx.textAlign = 'right';
-
-    for (const db of [-12, -24, -36, -48]) {
-      if (db < DB_FLOOR || db > dbTop) {
-        continue;
-      }
-      const norm = linearToDisplay(10 ** (db / 20), scaleTopLinear);
-      const y = Math.round(plotTop + plotH * (1 - norm)) + 0.5;
+    for (const frac of [0.25, 0.5, 0.75]) {
+      const y = Math.round(plotTop + plotH * (1 - frac)) + 0.5;
       ctx.beginPath();
       ctx.moveTo(plotLeft, y);
       ctx.lineTo(plotRight, y);
       ctx.stroke();
-      ctx.fillText(`${db}`, plotLeft - 4, Math.round(y + 3 * dpr));
     }
 
     const plotWInt = Math.max(1, Math.floor(plotW));
@@ -281,12 +289,6 @@ export class LevelGraph {
         }
       }
     }
-
-    ctx.fillStyle = '#8a95a8';
-    ctx.font = `${Math.round(10 * dpr)}px system-ui, sans-serif`;
-    ctx.textAlign = 'left';
-    const topDbLabel = dbTop.toFixed(0);
-    ctx.fillText(`${title} (−${Math.abs(DB_FLOOR)}…${topDbLabel} dB)`, plotLeft + 2, h - Math.round(4 * dpr));
   }
 }
 

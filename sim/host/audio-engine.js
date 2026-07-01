@@ -34,6 +34,9 @@ export class SimAudioEngine {
     }
 
     this.audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
     if (this.audioContext.sampleRate !== SAMPLE_RATE) {
       console.warn(
         `AudioContext sample rate is ${this.audioContext.sampleRate} Hz, expected ${SAMPLE_RATE} Hz`,

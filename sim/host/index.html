@@ -3,17 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
   <title>Module Chain Simulator — Chain MVP</title>
   <style>
     :root {
       font-family: system-ui, sans-serif;
       color: #e8e8e8;
       background: #12141a;
+      --chain-card-min: 14rem;
+      --chain-gap: 0.75rem;
     }
+    *, *::before, *::after { box-sizing: border-box; }
     body {
       margin: 0 auto;
       max-width: 100%;
-      padding: 1.5rem;
+      padding: 1rem;
+    }
+    @media (min-width: 48rem) {
+      body { padding: 1.5rem; }
     }
     h1 { font-size: 1.25rem; margin-top: 0; }
     h2 { font-size: 0.95rem; margin: 0 0 0.75rem; font-weight: 600; }
@@ -39,26 +46,59 @@
       font-size: 0.9rem;
     }
     .chain-row {
-      display: flex;
-      flex-direction: row;
-      align-items: stretch;
-      gap: 0.75rem;
-      overflow-x: auto;
-      padding-bottom: 0.5rem;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: var(--chain-gap);
       margin-top: 1rem;
+      align-items: stretch;
+    }
+    /* Landscape with room, or wide viewports: tile panes and wrap to next row */
+    @media (orientation: landscape) and (min-width: 36rem) {
+      .chain-row {
+        grid-template-columns: repeat(auto-fill, minmax(var(--chain-card-min), 1fr));
+      }
+    }
+    @media (min-width: 56rem) {
+      .chain-row {
+        grid-template-columns: repeat(auto-fill, minmax(var(--chain-card-min), 1fr));
+      }
+    }
+    #units-container {
+      display: contents;
     }
     .chain-card {
-      flex: 0 0 auto;
-      min-width: 14rem;
-      max-width: 16rem;
+      min-width: 0;
+      width: 100%;
       padding: 0.85rem;
       background: #1a1f2b;
       border: 1px solid #2a3140;
       border-radius: 8px;
     }
+    .chain-card.unit-card {
+      display: flex;
+      flex-direction: column;
+    }
+    .unit-card .card-controls {
+      flex: 0 0 auto;
+    }
+    .unit-card .level-graphs {
+      flex: 0 0 auto;
+      margin-top: auto;
+    }
+    .loopback-slot {
+      min-height: 1.75rem;
+    }
+    .unit-card:not(.is-rightmost) .loopback-row {
+      display: none;
+    }
     .chain-card.gateway {
       border-color: #3a5070;
-      min-width: 11rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .gateway-fill {
+      flex: 1 1 auto;
+      min-height: 0;
     }
     .chain-card .card-title {
       font-size: 0.8rem;
@@ -72,38 +112,24 @@
     .level-graphs {
       display: flex;
       flex-direction: column;
-      gap: 0.35rem;
-      margin-top: 0.5rem;
+      gap: 0.25rem;
+      width: 100%;
     }
     .level-graph {
       width: 100%;
-      height: 4.5rem;
+      height: 3.75rem;
       display: block;
       border-radius: 4px;
       border: 1px solid #2a3140;
       background: #141820;
       image-rendering: crisp-edges;
     }
-    .level-legend {
-      display: flex;
-      gap: 0.75rem;
-      font-size: 0.75rem;
-      color: #9ab;
-      margin-top: 0.25rem;
+    @media (max-width: 35.99rem), (orientation: portrait) and (max-width: 55.99rem) {
+      .level-graph { height: 4.25rem; }
     }
-    .level-legend span::before {
-      content: '';
-      display: inline-block;
-      width: 0.55rem;
-      height: 0.55rem;
-      border-radius: 2px;
-      margin-right: 0.25rem;
-      vertical-align: middle;
-    }
-    .level-legend .in::before { background: #5eb8ff; }
-    .level-legend .out::before { background: #ff8c5a; }
     .chain-controls {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 0.75rem;
       margin-top: 0.75rem;
@@ -123,6 +149,7 @@
         <label for="mic-toggle" style="margin: 0;">Microphone input</label>
       </div>
       <button id="start-btn" type="button" style="margin-top: 0.75rem; width: 100%;">Start audio</button>
+      <div class="gateway-fill" aria-hidden="true"></div>
     </div>
     <div id="units-container"></div>
   </div>

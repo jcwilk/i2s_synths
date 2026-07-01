@@ -6,13 +6,16 @@ export const MAX_PROCESSING_UNITS = 8;
 
 /**
  * Routes firmware-sized buffers through gateway (index 0) plus N WASM processing slots.
- * Wiring matches ai/planning/web-module-chain-simulator.md Phase 1.
+ * Inter-unit downstream links and rightmost loopback use one-buffer delayed handoff
+ * (previous period's downstream output), matching Phase 0 single-unit audibility.
  */
 export class ChainScheduler {
   constructor() {
     /** @type {{ bindings: object }[]} */
     this.slots = [];
     this.loopbackEnabled = false;
+    /** @type {Int16Array[]} previous downstream out per slot (loopback + inter-unit ds feed) */
+    this.prevDsOut = [];
     this.gatewayDsIn = new Int16Array(BUFFER_LEN);
     this.gatewayDsOut = new Int16Array(BUFFER_LEN);
     this.gatewayUsIn = new Int16Array(BUFFER_LEN);
@@ -21,6 +24,13 @@ export class ChainScheduler {
 
   setSlots(slots) {
     this.slots = slots;
+    while (this.prevDsOut.length < slots.length) {
+      this.prevDsOut.push(new Int16Array(BUFFER_LEN));
+    }
+    this.prevDsOut.length = slots.length;
+    for (const buf of this.prevDsOut) {
+      buf.fill(0);
+    }
   }
 
   setLoopbackEnabled(enabled) {
@@ -36,7 +46,7 @@ export class ChainScheduler {
     return sample / (sample < 0 ? 32768 : 32767);
   }
 
-  copyBuffer(dst, src, heap16, srcPtr) {
+  copyBuffer(dst, heap16, srcPtr) {
     const base = srcPtr >> 1;
     for (let i = 0; i < BUFFER_LEN; i++) {
       dst[i] = heap16[base + i];
@@ -61,7 +71,7 @@ export class ChainScheduler {
    */
   processBuffer(micFloatSamples, micEnabled) {
     const n = this.slots.length;
-    const levels = [];
+    const levels = new Array(n);
 
     for (let i = 0; i < BUFFER_LEN; i++) {
       this.gatewayDsIn[i] = micEnabled
@@ -80,29 +90,26 @@ export class ChainScheduler {
       return { playback: this.gatewayUsOutToFloat(), levels };
     }
 
-    const dsOut = new Array(n);
-    const usOut = new Array(n);
+    const dsOut = Array.from({ length: n }, () => new Int16Array(BUFFER_LEN));
+    const usOut = Array.from({ length: n }, () => new Int16Array(BUFFER_LEN));
 
-    for (let slot = 0; slot < n; slot++) {
-      const { heap16, ptrs } = this.slots[slot].bindings;
-      if (slot === 0) {
-        this.writeBuffer(heap16, ptrs.downstreamInPtr, this.gatewayDsOut);
-      } else {
-        this.writeBuffer(heap16, ptrs.downstreamInPtr, dsOut[slot - 1]);
-      }
-    }
-
+    // Right-to-left: upstream return path needs us_out[i+1] before processing slot i.
     for (let slot = n - 1; slot >= 0; slot--) {
       const { module, heap16, ptrs } = this.slots[slot].bindings;
-      const { upstreamInPtr, upstreamOutPtr, downstreamOutPtr } = ptrs;
+      const { upstreamInPtr, upstreamOutPtr, downstreamInPtr, downstreamOutPtr } = ptrs;
+
+      if (slot === 0) {
+        this.writeBuffer(heap16, downstreamInPtr, this.gatewayDsOut);
+      } else {
+        this.writeBuffer(heap16, downstreamInPtr, this.prevDsOut[slot - 1]);
+      }
+
+      const dsInBase = downstreamInPtr >> 1;
+      const inLevel = peakInt16Interleaved(heap16, dsInBase, BUFFER_LEN);
 
       if (slot === n - 1) {
         if (this.loopbackEnabled) {
-          const dsOutBase = downstreamOutPtr >> 1;
-          const usInBase = upstreamInPtr >> 1;
-          for (let i = 0; i < BUFFER_LEN; i++) {
-            heap16[usInBase + i] = heap16[dsOutBase + i];
-          }
+          this.writeBuffer(heap16, upstreamInPtr, this.prevDsOut[slot]);
         } else {
           this.clearBuffer(heap16, upstreamInPtr);
         }
@@ -113,13 +120,12 @@ export class ChainScheduler {
       module._sim_process_upstream();
       module._sim_process_downstream();
 
-      this.copyBuffer(dsOut[slot], null, heap16, downstreamOutPtr);
-      this.copyBuffer(usOut[slot], null, heap16, upstreamOutPtr);
+      this.copyBuffer(dsOut[slot], heap16, downstreamOutPtr);
+      this.copyBuffer(usOut[slot], heap16, upstreamOutPtr);
+      this.prevDsOut[slot].set(dsOut[slot]);
 
-      const dsInBase = ptrs.downstreamInPtr >> 1;
-      const inLevel = peakInt16Interleaved(heap16, dsInBase, BUFFER_LEN);
       const outLevel = peakInt16Interleaved(heap16, upstreamOutPtr >> 1, BUFFER_LEN);
-      levels.push({ in: inLevel, out: outLevel });
+      levels[slot] = { in: inLevel, out: outLevel };
     }
 
     for (let i = 0; i < BUFFER_LEN; i++) {

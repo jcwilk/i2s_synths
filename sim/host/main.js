@@ -122,9 +122,10 @@ function updateUnitCountHint() {
 
 function updateLoopbackVisibility() {
   for (let i = 0; i < units.length; i++) {
-    const show = i === units.length - 1;
-    units[i].loopbackRow.hidden = !show;
-    if (!show) {
+    const isRightmost = i === units.length - 1;
+    units[i].card.classList.toggle('is-rightmost', isRightmost);
+    units[i].loopbackRow.hidden = !isRightmost;
+    if (!isRightmost) {
       units[i].loopbackEnabled = false;
       units[i].loopbackCheckbox.checked = false;
     }
@@ -146,26 +147,26 @@ class ProcessingUnit {
     this.card.className = 'chain-card unit-card';
     this.card.innerHTML = `
       <div class="card-title">Unit ${index + 1}</div>
-      <label>Module type</label>
-      <select class="module-select"></select>
-      <label>Primary pot</label>
-      <div class="row">
-        <input class="primary-pot" type="range" min="0" max="100" value="50" />
-        <span class="primary-value">50%</span>
-      </div>
-      <label>Secondary pot</label>
-      <div class="row">
-        <input class="secondary-pot" type="range" min="0" max="100" value="0" />
-        <span class="secondary-value">0%</span>
-      </div>
-      <div class="loopback-row row">
-        <input class="loopback-toggle" type="checkbox" />
-        <label style="margin:0;">Loopback (upstream ← downstream)</label>
-      </div>
-      <p class="module-info" hidden></p>
-      <div class="level-legend">
-        <span class="in">In (downstream)</span>
-        <span class="out">Out (upstream)</span>
+      <div class="card-controls">
+        <label>Module type</label>
+        <select class="module-select"></select>
+        <label>Primary pot</label>
+        <div class="row">
+          <input class="primary-pot" type="range" min="0" max="100" value="50" />
+          <span class="primary-value">50%</span>
+        </div>
+        <label>Secondary pot</label>
+        <div class="row">
+          <input class="secondary-pot" type="range" min="0" max="100" value="0" />
+          <span class="secondary-value">0%</span>
+        </div>
+        <div class="loopback-slot">
+          <div class="loopback-row row">
+            <input class="loopback-toggle" type="checkbox" id="loopback-u${index}" />
+            <label for="loopback-u${index}" style="margin:0;">Loopback</label>
+          </div>
+        </div>
+        <p class="module-info" hidden></p>
       </div>
       <div class="level-graphs"></div>
     `;
@@ -184,7 +185,10 @@ class ProcessingUnit {
       const canvas = document.createElement('canvas');
       canvas.className = 'level-graph';
       canvas.id = `level-graph-u${index}-${speed.id}`;
-      canvas.setAttribute('aria-label', `Unit ${index + 1} level graph ${speed.title}`);
+      canvas.setAttribute(
+        'aria-label',
+        `Unit ${index + 1} level graph ${speed.title}, blue in orange out`,
+      );
       this.levelGraphsContainer.appendChild(canvas);
       this.levelGraphs.push(
         new LevelGraph(canvas, {
@@ -302,6 +306,12 @@ class ProcessingUnit {
     }
   }
 
+  resizeLevelGraphs() {
+    for (const graph of this.levelGraphs) {
+      graph.resize();
+    }
+  }
+
   destroy() {
     this.levelSampler.stop();
     const idx = levelSamplers.indexOf(this.levelSampler);
@@ -399,6 +409,7 @@ async function addUnit(moduleKey = 'delay') {
   const unit = new ProcessingUnit(units.length, moduleKey);
   units.push(unit);
   ui.unitsContainer.appendChild(unit.card);
+  unit.resizeLevelGraphs();
   updateUnitCountHint();
   updateLoopbackVisibility();
   await unit.loadModule(moduleKey);
@@ -440,6 +451,11 @@ async function onStartClick() {
       sampler.start();
     }
     ui.startBtn.textContent = 'Stop audio';
+    const rightmost = units[units.length - 1];
+    if (rightmost && !rightmost.loopbackEnabled) {
+      ui.status.textContent +=
+        ' — enable loopback on the rightmost unit (or use Debug Tone) to hear effect modules on speakers.';
+    }
   } catch (err) {
     ui.status.textContent = `Failed to start audio: ${err.message}`;
   } finally {
