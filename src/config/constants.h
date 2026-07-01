@@ -13,11 +13,11 @@
 
 // Active module selection (can be overridden before including this header)
 #ifndef ACTIVE_MODULE
-#define ACTIVE_MODULE MODULE_DEBUG_TONE
+#define ACTIVE_MODULE MODULE_DELAY
 #endif
 
 // Gateway and system policy
-#define ENABLE_GATEWAY 1
+#define ENABLE_GATEWAY 0
 
 // I2S pin definitions for downstream interface
 #define I2SD_MCK 12

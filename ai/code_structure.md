@@ -40,9 +40,9 @@ MyProject/
 
 ---
 
-## 3) Header‑Only Preferred
+## 3) eader-Only Preferred
 
-Prefer header‑only components with `inline` methods for simplicity, predictable linkage, and to avoid ODR issues.
+Prefer header-only components with `inline` methods for build simplicity, code organization, predictable linkage, and to avoid ODR issues.
 
 **Example (template)**
 
@@ -61,6 +61,30 @@ public:
 
 #endif
 ```
+
+### Benefits
+
+- **Simplified build process**: Eliminates separate compilation units and linking complexity
+- **Predictable linkage**: Avoids ODR violations that can occur with multiple translation units
+- **Template compatibility**: Essential for template-heavy code
+
+### Performance Considerations
+
+The `inline` keyword is a suggestion to the compiler, not a command. Arduino compiles with size optimization (`-Os`) by default, making the compiler less likely to actually inline functions unless they're very small.
+
+**Potential performance downsides:**
+
+- **Code bloat**: Large functions inlined at multiple call sites can increase binary size substantially
+- **Cache pressure**: On ESP32, excessive inlining can consume too much of the 32KB instruction cache per CPU core, potentially making execution slower due to cache misses
+- **Compilation time**: All included files must parse function definitions, slowing builds
+
+### Implementation Guidelines
+
+- Keep inline functions **small and simple** (avoid loops, deep conditionals, recursion)
+- Use explicit `inline` keyword for ODR compliance and clarity
+- For larger functions or complex logic, consider using separate `.cpp` files (see separate compilation section)
+
+The primary motivation is **build simplicity** and **code organization**, not performance optimization.
 
 ---
 
