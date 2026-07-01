@@ -88,6 +88,44 @@ Reading tips:
 
 See [ai/hardware.md](ai/hardware.md) for hardware details.
 
+### Build and flash
+
+Headless compile and upload for the ESP32-S3-Zero control module (OPI PSRAM, USB CDC, 4MB flash). Module selection is compile-time via the build scripts; the default in `src/config/constants.h` is unchanged for Arduino IDE users.
+
+**Prerequisites**
+
+- [arduino-cli](https://arduino.github.io/arduino-cli/) (tested with 1.3.x)
+- ESP32 Arduino core: `arduino-cli core install esp32:esp32`
+- Linux: add your user to the `dialout` group for USB serial upload (`sudo usermod -aG dialout $USER`, then log out/in)
+
+**Build**
+
+From the repository root:
+
+```bash
+./scripts/build.sh delay          # one module variant
+./scripts/build.sh all            # every supported module
+```
+
+Supported module names: `passthrough`, `delay`, `merger`, `debug_tone`, `cutoff`.
+
+Board options are pinned in `arduino-cli.yaml`. The scripts stage the sketch under `.build-sketch/` so the folder name matches `i2s_synths.ino` (required by Arduino CLI when the checkout directory name differs).
+
+**Upload and serial monitor**
+
+Optional `.env` (gitignored; see `.env.example`) can set `FIRMWARE_PORT` when auto-detection is ambiguous. If unset, scripts use the sole connected `/dev/ttyACM*` or `/dev/ttyUSB*` device.
+
+```bash
+./scripts/upload.sh delay         # compile + flash selected module
+./scripts/monitor.sh              # capture serial for 10s (115200 baud)
+./scripts/monitor.sh 15           # custom duration in seconds
+```
+
+**ESP32-S3-Zero notes**
+
+- Native USB CDC (no external USB-UART). Hold **BOOT** while plugging in or resetting if the serial port does not appear or upload fails.
+- After flash, expect boot lines including `ESP32-S3-Zero I2S Audio Processing` and `Setup complete.` on the monitor.
+
 ### Versions
 
 v2 - the current version, still soldering together control modules at time of writing

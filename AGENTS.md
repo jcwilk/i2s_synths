@@ -21,7 +21,7 @@
 
 | Guide | Consult when |
 |-------|----------------|
-| **`README.md`** | Scoping tasks; validating high-level goals |
+| **`README.md`** | Scoping tasks; validating high-level goals; **firmware compile/upload verification** (see “Build and flash”) |
 | **`ai/code_structure.md`** | Adding/moving files; creating/updating modules; choosing folders; shared helpers; header vs cpp |
 | **`ai/functional_programming.md`** | Defining/updating state; update loops; ISR boundaries; mappers/query helpers |
 | **`ai/hardware.md`**, **`ai/library_reference/`** | Pins/roles/clocks; I2S buffer/timing; driver calls; ADC/attenuation |

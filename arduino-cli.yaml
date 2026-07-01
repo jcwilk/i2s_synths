@@ -1,0 +1,15 @@
+# Repository-local Arduino CLI configuration for i2s_synths firmware builds.
+# Scripts pass this file via --config-file.
+#
+# firmware_build keys are parsed by scripts/*.sh (arduino-cli ignores unknown keys).
+
+board_manager:
+  additional_urls: []
+
+sketch:
+  always_export_binaries: false
+
+firmware_build:
+  fqbn: esp32:esp32:esp32s3:PSRAM=opi,CDCOnBoot=cdc,USBMode=hwcdc,FlashSize=4M
+  sketch_name: i2s_synths
+  serial_baud: 115200
