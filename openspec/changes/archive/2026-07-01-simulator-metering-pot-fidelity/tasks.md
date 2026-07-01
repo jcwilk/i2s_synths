@@ -2,7 +2,7 @@
 
 ## 1. Spec reconciliation prep
 
-- [ ] 1.1 Replace the TBD **Purpose** paragraph in `openspec/specs/module-chain-simulator/spec.md` during archive with a one-paragraph summary of the Phase 0 browser simulator (single unit, WASM modules, controls, metering)
+- [x] 1.1 Replace the TBD **Purpose** paragraph in `openspec/specs/module-chain-simulator/spec.md` during archive with a one-paragraph summary of the Phase 0 browser simulator (single unit, WASM modules, controls, metering)
 
 ## 2. Level metering
 
