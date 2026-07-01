@@ -1,153 +1,52 @@
 import { SimAudioEngine } from './audio-engine.js';
+import { ChainScheduler, MAX_PROCESSING_UNITS } from './chain-scheduler.js';
 import { POT_POLL_MS, applyPotStep } from './pot-simulator.js';
-import { LevelGraph, LevelGraphSampler, LEVEL_GRAPH_CHANNELS, LEVEL_GRAPH_SPEEDS } from './level-graph.js';
+import {
+  LevelGraph,
+  LevelGraphSampler,
+  LEVEL_GRAPH_CHANNELS,
+  LEVEL_GRAPH_SPEEDS,
+} from './level-graph.js';
 
 const MODULES = {
   passthrough: { label: 'Passthrough', artifact: '../wasm/out/passthrough.js' },
   delay: { label: 'Delay', artifact: '../wasm/out/delay.js' },
+  merger: { label: 'Merger', artifact: '../wasm/out/merger.js' },
+  debug_tone: { label: 'Debug Tone', artifact: '../wasm/out/debug_tone.js' },
+  cutoff: { label: 'Cutoff', artifact: '../wasm/out/cutoff.js' },
 };
 
-let activeModule = null;
-let wasmModule = null;
-let wasmBindings = null;
+const MODULE_KEYS = Object.keys(MODULES);
 
 const ui = {
-  moduleSelect: document.getElementById('module-select'),
-  primaryPot: document.getElementById('primary-pot'),
-  secondaryPot: document.getElementById('secondary-pot'),
-  primaryValue: document.getElementById('primary-value'),
-  secondaryValue: document.getElementById('secondary-value'),
+  unitsContainer: document.getElementById('units-container'),
+  addUnitBtn: document.getElementById('add-unit-btn'),
+  unitCountHint: document.getElementById('unit-count-hint'),
   micToggle: document.getElementById('mic-toggle'),
   startBtn: document.getElementById('start-btn'),
   status: document.getElementById('status'),
-  delayInfo: document.getElementById('delay-info'),
 };
 
 const engine = new SimAudioEngine();
+const scheduler = new ChainScheduler();
+engine.setChainScheduler(scheduler);
+
 engine.onStatus = (msg) => {
   ui.status.textContent = msg;
 };
 
-const levelGraphs = LEVEL_GRAPH_SPEEDS.map((speed) => {
-  const canvas = document.getElementById(`level-graph-${speed.id}`);
-  return new LevelGraph(canvas, {
-    durationSec: speed.durationSec,
-    title: speed.title,
-    channels: LEVEL_GRAPH_CHANNELS,
-  });
-});
+/** @type {ProcessingUnit[]} */
+const units = [];
 
-const levelSampler = new LevelGraphSampler(levelGraphs);
-
-engine.onLevels = (levels) => {
-  levelSampler.feed(levels);
-};
-
-const potTargets = { primary: 0.5, secondary: 0 };
 let potPollTimer = null;
 let lastPotPollMs = 0;
 let potDragRafId = null;
 let potDragPointers = 0;
-
-function potSliderTo01(slider) {
-  return Number(slider.value) / 100;
-}
-
-function syncPotTargetsFromSliders() {
-  potTargets.primary = potSliderTo01(ui.primaryPot);
-  potTargets.secondary = potSliderTo01(ui.secondaryPot);
-}
-
-function updatePotValueLabels() {
-  if (!wasmBindings) {
-    return;
-  }
-  const { heapF32, potsPtr } = wasmBindings;
-  const base = potsPtr >> 2;
-  ui.primaryValue.textContent = `${(heapF32[base + 2] * 100).toFixed(1)}%`;
-  ui.secondaryValue.textContent = `${(heapF32[base + 5] * 100).toFixed(1)}%`;
-}
-
-function tickPots(deltaMs) {
-  if (!wasmBindings) {
-    return;
-  }
-  const { heapF32, potsPtr } = wasmBindings;
-  const base = potsPtr >> 2;
-  applyPotStep(heapF32, base + 1, base + 2, potTargets.primary, deltaMs);
-  applyPotStep(heapF32, base + 4, base + 5, potTargets.secondary, deltaMs);
-  updatePotValueLabels();
-}
-
-function stopPotDragLoop() {
-  if (potDragRafId !== null) {
-    cancelAnimationFrame(potDragRafId);
-    potDragRafId = null;
-  }
-}
-
-function startPotDragLoop() {
-  if (potDragRafId !== null) {
-    return;
-  }
-  const frame = () => {
-    syncPotTargetsFromSliders();
-    potDragRafId = requestAnimationFrame(frame);
-  };
-  potDragRafId = requestAnimationFrame(frame);
-}
-
-function onPotSliderPointerDown(event) {
-  event.currentTarget.setPointerCapture?.(event.pointerId);
-  potDragPointers += 1;
-  startPotDragLoop();
-  syncPotTargetsFromSliders();
-}
-
-function onPotSliderPointerUp(event) {
-  if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-  potDragPointers = Math.max(0, potDragPointers - 1);
-  if (potDragPointers === 0) {
-    stopPotDragLoop();
-  }
-  syncPotTargetsFromSliders();
-}
-
-function bindPotSlider(slider) {
-  slider.addEventListener('input', syncPotTargetsFromSliders);
-  slider.addEventListener('change', syncPotTargetsFromSliders);
-  slider.addEventListener('pointerdown', onPotSliderPointerDown);
-  slider.addEventListener('pointerup', onPotSliderPointerUp);
-  slider.addEventListener('pointercancel', onPotSliderPointerUp);
-}
-
-function stopPotPoller() {
-  if (potPollTimer !== null) {
-    clearInterval(potPollTimer);
-    potPollTimer = null;
-  }
-  stopPotDragLoop();
-  potDragPointers = 0;
-  lastPotPollMs = 0;
-}
-
-function startPotPoller() {
-  stopPotPoller();
-  lastPotPollMs = performance.now();
-  tickPots(POT_POLL_MS);
-  potPollTimer = setInterval(() => {
-    const now = performance.now();
-    const deltaMs = now - lastPotPollMs;
-    lastPotPollMs = now;
-    tickPots(deltaMs);
-  }, POT_POLL_MS);
-}
+/** @type {LevelGraphSampler[]} */
+const levelSamplers = [];
 
 /**
- * Emscripten MODULARIZE builds expose createSimModule. With EXPORT_ES6 that is
- * the module default export; legacy builds only assign a global / CommonJS export.
+ * Emscripten MODULARIZE builds expose createSimModule.
  */
 async function loadEmscriptenFactory(artifactUrl, cacheKey) {
   let factory;
@@ -168,36 +67,20 @@ async function loadEmscriptenFactory(artifactUrl, cacheKey) {
     script.src = bustedUrl;
     script.async = true;
     script.onload = () => {
-      const factory = globalThis.createSimModule;
-      if (typeof factory !== 'function') {
+      const f = globalThis.createSimModule;
+      if (typeof f !== 'function') {
         reject(new Error('createSimModule not found after script load'));
         return;
       }
-      resolve(factory);
+      resolve(f);
     };
     script.onerror = () => reject(new Error(`Failed to load ${bustedUrl}`));
     document.head.appendChild(script);
   });
 }
 
-async function loadWasmModule(moduleKey) {
-  stopPotPoller();
-  if (wasmModule) {
-    try {
-      if (engine.running) {
-        await engine.stop();
-        ui.startBtn.textContent = 'Start audio';
-      }
-    } catch (_) {
-      /* ignore */
-    }
-    wasmModule = null;
-    wasmBindings = null;
-  }
-
+async function createWasmBindings(moduleKey) {
   const spec = MODULES[moduleKey];
-  ui.status.textContent = `Loading ${spec.label} WASM…`;
-
   const artifactUrl = new URL(spec.artifact, import.meta.url).href;
   const factory = await loadEmscriptenFactory(artifactUrl, moduleKey);
   const module = await factory({
@@ -206,74 +89,356 @@ async function loadWasmModule(moduleKey) {
 
   module._sim_setup();
 
-  const bufferLen = module._sim_get_buffer_len();
-  const upstreamInPtr = module._sim_get_upstream_in();
-  const upstreamOutPtr = module._sim_get_upstream_out();
-  const downstreamInPtr = module._sim_get_downstream_in();
-  const downstreamOutPtr = module._sim_get_downstream_out();
-  const potsPtr = module._sim_get_pots();
-
-  wasmModule = module;
-  wasmBindings = {
+  return {
     module,
     heap16: module.HEAP16,
     heapF32: module.HEAPF32,
     ptrs: {
-      upstreamInPtr,
-      upstreamOutPtr,
-      downstreamInPtr,
-      downstreamOutPtr,
+      upstreamInPtr: module._sim_get_upstream_in(),
+      upstreamOutPtr: module._sim_get_upstream_out(),
+      downstreamInPtr: module._sim_get_downstream_in(),
+      downstreamOutPtr: module._sim_get_downstream_out(),
     },
-    potsPtr,
-    bufferLen,
+    potsPtr: module._sim_get_pots(),
+    bufferLen: module._sim_get_buffer_len(),
+    moduleKey,
   };
-
-  engine.setWasmBindings(wasmBindings);
-  syncPotTargetsFromSliders();
-  startPotPoller();
-
-  if (moduleKey === 'delay' && module._sim_get_delay_buffer_frames) {
-    const frames = module._sim_get_delay_buffer_frames();
-    const ms = ((frames * 1000) / 44100).toFixed(1);
-    ui.delayInfo.textContent = `Delay ring: ${frames} frames (${ms} ms capacity)`;
-    ui.delayInfo.hidden = false;
-  } else {
-    ui.delayInfo.hidden = true;
-  }
-
-  ui.status.textContent = `${spec.label} module ready`;
 }
 
-async function onModuleChange() {
-  const key = ui.moduleSelect.value;
-  if (key === activeModule) {
+function potSliderTo01(slider) {
+  return Number(slider.value) / 100;
+}
+
+function syncBindingsToScheduler() {
+  scheduler.setSlots(units.map((u) => ({ bindings: u.bindings })));
+  const rightmost = units[units.length - 1];
+  scheduler.setLoopbackEnabled(rightmost?.loopbackEnabled ?? false);
+}
+
+function updateUnitCountHint() {
+  ui.unitCountHint.textContent = `${units.length} / ${MAX_PROCESSING_UNITS} processing units`;
+  ui.addUnitBtn.disabled = units.length >= MAX_PROCESSING_UNITS;
+}
+
+function updateLoopbackVisibility() {
+  for (let i = 0; i < units.length; i++) {
+    const show = i === units.length - 1;
+    units[i].loopbackRow.hidden = !show;
+    if (!show) {
+      units[i].loopbackEnabled = false;
+      units[i].loopbackCheckbox.checked = false;
+    }
+  }
+  syncBindingsToScheduler();
+}
+
+class ProcessingUnit {
+  constructor(index, moduleKey = 'delay') {
+    this.index = index;
+    this.moduleKey = moduleKey;
+    this.bindings = null;
+    this.loopbackEnabled = false;
+    this.potTargets = { primary: 0.5, secondary: 0 };
+    this.levelGraphs = [];
+    this.levelSampler = null;
+
+    this.card = document.createElement('div');
+    this.card.className = 'chain-card unit-card';
+    this.card.innerHTML = `
+      <div class="card-title">Unit ${index + 1}</div>
+      <label>Module type</label>
+      <select class="module-select"></select>
+      <label>Primary pot</label>
+      <div class="row">
+        <input class="primary-pot" type="range" min="0" max="100" value="50" />
+        <span class="primary-value">50%</span>
+      </div>
+      <label>Secondary pot</label>
+      <div class="row">
+        <input class="secondary-pot" type="range" min="0" max="100" value="0" />
+        <span class="secondary-value">0%</span>
+      </div>
+      <div class="loopback-row row">
+        <input class="loopback-toggle" type="checkbox" />
+        <label style="margin:0;">Loopback (upstream ← downstream)</label>
+      </div>
+      <p class="module-info" hidden></p>
+      <div class="level-legend">
+        <span class="in">In (downstream)</span>
+        <span class="out">Out (upstream)</span>
+      </div>
+      <div class="level-graphs"></div>
+    `;
+
+    this.moduleSelect = this.card.querySelector('.module-select');
+    this.primaryPot = this.card.querySelector('.primary-pot');
+    this.secondaryPot = this.card.querySelector('.secondary-pot');
+    this.primaryValue = this.card.querySelector('.primary-value');
+    this.secondaryValue = this.card.querySelector('.secondary-value');
+    this.loopbackRow = this.card.querySelector('.loopback-row');
+    this.loopbackCheckbox = this.card.querySelector('.loopback-toggle');
+    this.moduleInfo = this.card.querySelector('.module-info');
+    this.levelGraphsContainer = this.card.querySelector('.level-graphs');
+
+    for (const speed of LEVEL_GRAPH_SPEEDS) {
+      const canvas = document.createElement('canvas');
+      canvas.className = 'level-graph';
+      canvas.id = `level-graph-u${index}-${speed.id}`;
+      canvas.setAttribute('aria-label', `Unit ${index + 1} level graph ${speed.title}`);
+      this.levelGraphsContainer.appendChild(canvas);
+      this.levelGraphs.push(
+        new LevelGraph(canvas, {
+          durationSec: speed.durationSec,
+          title: speed.title,
+          channels: LEVEL_GRAPH_CHANNELS,
+        }),
+      );
+    }
+    this.levelSampler = new LevelGraphSampler(this.levelGraphs);
+    levelSamplers.push(this.levelSampler);
+
+    for (const key of MODULE_KEYS) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = MODULES[key].label;
+      if (key === moduleKey) {
+        opt.selected = true;
+      }
+      this.moduleSelect.appendChild(opt);
+    }
+
+    this.moduleSelect.addEventListener('change', () => {
+      this.changeModuleType(this.moduleSelect.value).catch((err) => {
+        ui.status.textContent = `Module load failed: ${err.message}`;
+      });
+    });
+
+    this.loopbackCheckbox.addEventListener('change', () => {
+      this.loopbackEnabled = this.loopbackCheckbox.checked;
+      syncBindingsToScheduler();
+    });
+
+    bindPotSlider(this.primaryPot, () => this.syncPotTargets());
+    bindPotSlider(this.secondaryPot, () => this.syncPotTargets());
+  }
+
+  syncPotTargets() {
+    this.potTargets.primary = potSliderTo01(this.primaryPot);
+    this.potTargets.secondary = potSliderTo01(this.secondaryPot);
+  }
+
+  resetPotSmoothedToSliders() {
+    if (!this.bindings) {
+      return;
+    }
+    const { heapF32, potsPtr } = this.bindings;
+    const base = potsPtr >> 2;
+    const primary = potSliderTo01(this.primaryPot);
+    const secondary = potSliderTo01(this.secondaryPot);
+    heapF32[base + 1] = primary;
+    heapF32[base + 2] = primary;
+    heapF32[base + 4] = secondary;
+    heapF32[base + 5] = secondary;
+    this.potTargets = { primary, secondary };
+    this.updatePotValueLabels();
+  }
+
+  updatePotValueLabels() {
+    if (!this.bindings) {
+      return;
+    }
+    const { heapF32, potsPtr } = this.bindings;
+    const base = potsPtr >> 2;
+    this.primaryValue.textContent = `${(heapF32[base + 2] * 100).toFixed(1)}%`;
+    this.secondaryValue.textContent = `${(heapF32[base + 5] * 100).toFixed(1)}%`;
+  }
+
+  tickPots(deltaMs) {
+    if (!this.bindings) {
+      return;
+    }
+    const { heapF32, potsPtr } = this.bindings;
+    const base = potsPtr >> 2;
+    applyPotStep(heapF32, base + 1, base + 2, this.potTargets.primary, deltaMs);
+    applyPotStep(heapF32, base + 4, base + 5, this.potTargets.secondary, deltaMs);
+    this.updatePotValueLabels();
+  }
+
+  updateModuleInfo() {
+    if (!this.bindings) {
+      this.moduleInfo.hidden = true;
+      return;
+    }
+    const { module, moduleKey } = this.bindings;
+    if (moduleKey === 'delay' && module._sim_get_delay_buffer_frames) {
+      const frames = module._sim_get_delay_buffer_frames();
+      const ms = ((frames * 1000) / 44100).toFixed(1);
+      this.moduleInfo.textContent = `Delay ring: ${frames} frames (${ms} ms)`;
+      this.moduleInfo.hidden = false;
+    } else {
+      this.moduleInfo.hidden = true;
+    }
+  }
+
+  async loadModule(moduleKey) {
+    this.moduleKey = moduleKey;
+    this.bindings = await createWasmBindings(moduleKey);
+    this.resetPotSmoothedToSliders();
+    this.updateModuleInfo();
+    syncBindingsToScheduler();
+  }
+
+  async changeModuleType(moduleKey) {
+    if (moduleKey === this.moduleKey && this.bindings) {
+      return;
+    }
+    await this.loadModule(moduleKey);
+    ui.status.textContent = `${MODULES[moduleKey].label} ready on unit ${this.index + 1}`;
+  }
+
+  clearLevelGraphs() {
+    for (const graph of this.levelGraphs) {
+      graph.clear();
+    }
+  }
+
+  destroy() {
+    this.levelSampler.stop();
+    const idx = levelSamplers.indexOf(this.levelSampler);
+    if (idx >= 0) {
+      levelSamplers.splice(idx, 1);
+    }
+    for (const graph of this.levelGraphs) {
+      graph.destroy();
+    }
+    this.card.remove();
+  }
+}
+
+function bindPotSlider(slider, onInput) {
+  slider.addEventListener('input', onInput);
+  slider.addEventListener('change', onInput);
+  slider.addEventListener('pointerdown', (event) => {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    potDragPointers += 1;
+    startPotDragLoop();
+    onInput();
+  });
+  slider.addEventListener('pointerup', (event) => {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    potDragPointers = Math.max(0, potDragPointers - 1);
+    if (potDragPointers === 0) {
+      stopPotDragLoop();
+    }
+    onInput();
+  });
+  slider.addEventListener('pointercancel', (event) => {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    potDragPointers = Math.max(0, potDragPointers - 1);
+    if (potDragPointers === 0) {
+      stopPotDragLoop();
+    }
+    onInput();
+  });
+}
+
+function stopPotDragLoop() {
+  if (potDragRafId !== null) {
+    cancelAnimationFrame(potDragRafId);
+    potDragRafId = null;
+  }
+}
+
+function startPotDragLoop() {
+  if (potDragRafId !== null) {
     return;
   }
-  activeModule = key;
-  await loadWasmModule(key);
+  const frame = () => {
+    for (const unit of units) {
+      unit.syncPotTargets();
+    }
+    potDragRafId = requestAnimationFrame(frame);
+  };
+  potDragRafId = requestAnimationFrame(frame);
 }
+
+function stopPotPoller() {
+  if (potPollTimer !== null) {
+    clearInterval(potPollTimer);
+    potPollTimer = null;
+  }
+  stopPotDragLoop();
+  potDragPointers = 0;
+  lastPotPollMs = 0;
+}
+
+function startPotPoller() {
+  stopPotPoller();
+  lastPotPollMs = performance.now();
+  for (const unit of units) {
+    unit.tickPots(POT_POLL_MS);
+  }
+  potPollTimer = setInterval(() => {
+    const now = performance.now();
+    const deltaMs = now - lastPotPollMs;
+    lastPotPollMs = now;
+    for (const unit of units) {
+      unit.tickPots(deltaMs);
+    }
+  }, POT_POLL_MS);
+}
+
+async function addUnit(moduleKey = 'delay') {
+  if (units.length >= MAX_PROCESSING_UNITS) {
+    return;
+  }
+  const unit = new ProcessingUnit(units.length, moduleKey);
+  units.push(unit);
+  ui.unitsContainer.appendChild(unit.card);
+  updateUnitCountHint();
+  updateLoopbackVisibility();
+  await unit.loadModule(moduleKey);
+  startPotPoller();
+}
+
+engine.onLevels = (levels) => {
+  for (let i = 0; i < units.length; i++) {
+    if (levels[i]) {
+      levelSamplers[i]?.feed(levels[i]);
+    }
+  }
+};
 
 async function onStartClick() {
   if (engine.running) {
-    levelSampler.stop();
+    for (const sampler of levelSamplers) {
+      sampler.stop();
+    }
     await engine.stop();
     ui.startBtn.textContent = 'Start audio';
-    ui.startBtn.disabled = false;
-    for (const graph of levelGraphs) {
-      graph.clear();
+    for (const unit of units) {
+      unit.clearLevelGraphs();
     }
     return;
   }
 
-  if (!wasmBindings) {
-    await loadWasmModule(ui.moduleSelect.value);
+  if (units.length === 0) {
+    ui.status.textContent = 'Add at least one processing unit';
+    return;
   }
 
   ui.startBtn.disabled = true;
   try {
+    syncBindingsToScheduler();
     await engine.start();
     engine.setMicEnabled(ui.micToggle.checked);
-    levelSampler.start();
+    for (const sampler of levelSamplers) {
+      sampler.start();
+    }
     ui.startBtn.textContent = 'Stop audio';
   } catch (err) {
     ui.status.textContent = `Failed to start audio: ${err.message}`;
@@ -281,15 +446,6 @@ async function onStartClick() {
     ui.startBtn.disabled = false;
   }
 }
-
-ui.moduleSelect.addEventListener('change', () => {
-  onModuleChange().catch((err) => {
-    ui.status.textContent = `Module load failed: ${err.message}`;
-  });
-});
-
-bindPotSlider(ui.primaryPot);
-bindPotSlider(ui.secondaryPot);
 
 ui.micToggle.addEventListener('change', () => {
   engine.setMicEnabled(ui.micToggle.checked);
@@ -301,7 +457,18 @@ ui.startBtn.addEventListener('click', () => {
   });
 });
 
-activeModule = ui.moduleSelect.value;
-loadWasmModule(activeModule).catch((err) => {
-  ui.status.textContent = `Initial load failed: ${err.message}`;
+ui.addUnitBtn.addEventListener('click', () => {
+  addUnit('passthrough').catch((err) => {
+    ui.status.textContent = `Add unit failed: ${err.message}`;
+  });
 });
+
+addUnit('delay')
+  .then(() => {
+    ui.status.textContent = 'Chain ready — gateway plus one unit loaded';
+  })
+  .catch((err) => {
+    ui.status.textContent = `Initial load failed: ${err.message}`;
+  });
+
+updateUnitCountHint();

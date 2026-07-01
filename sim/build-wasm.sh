@@ -50,5 +50,8 @@ build_variant() {
 
 build_variant passthrough 0
 build_variant delay 1
+build_variant merger 2
+build_variant debug_tone 3
+build_variant cutoff 4
 
 echo "WASM artifacts written to $OUT"

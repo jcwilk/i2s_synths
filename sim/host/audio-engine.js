@@ -1,8 +1,6 @@
 const SAMPLE_RATE = 44100;
 const BUFFER_LEN = 512;
 
-import { peakFloatInterleaved, peakInt16Interleaved } from './level-graph.js';
-
 export class SimAudioEngine {
   constructor() {
     this.audioContext = null;
@@ -10,19 +8,15 @@ export class SimAudioEngine {
     this.micStream = null;
     this.micSource = null;
     this.playbackNode = null;
-    this.playbackBuffer = null;
-    this.playbackReadIndex = 0;
     this.running = false;
     this.micEnabled = false;
     this.onStatus = () => {};
     this.onLevels = () => {};
-    this.wasmBindings = null;
-    this.prevDownstreamOut = null;
+    this.chainScheduler = null;
   }
 
-  setWasmBindings(bindings) {
-    this.wasmBindings = bindings;
-    this.prevDownstreamOut = new Int16Array(BUFFER_LEN);
+  setChainScheduler(scheduler) {
+    this.chainScheduler = scheduler;
     if (this.workletNode) {
       this.workletNode.port.postMessage({
         type: 'config',
@@ -35,8 +29,8 @@ export class SimAudioEngine {
     if (this.running) {
       return;
     }
-    if (!this.wasmBindings) {
-      throw new Error('WASM module not loaded');
+    if (!this.chainScheduler) {
+      throw new Error('Chain scheduler not configured');
     }
 
     this.audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
@@ -60,13 +54,8 @@ export class SimAudioEngine {
       }
     };
 
-    this.playbackBuffer = new Float32Array(BUFFER_LEN);
-    this.playbackReadIndex = 0;
-
     await this.ensurePlaybackWorklet();
     this.playbackNode = new AudioWorkletNode(this.audioContext, 'module-chain-playback');
-
-    // Playback is driven only via port messages, not the capture worklet output.
     this.playbackNode.connect(this.audioContext.destination);
 
     await this.ensureMicGraph();
@@ -87,7 +76,6 @@ export class SimAudioEngine {
           this.port.onmessage = (event) => {
             if (event.data.type === 'playback') {
               this.queue.push(event.data.samples);
-              // Drop stale buffers if main thread runs ahead of the audio clock.
               while (this.queue.length > 3) {
                 this.queue.shift();
               }
@@ -174,55 +162,20 @@ export class SimAudioEngine {
     }
   }
 
-  floatToInt16(sample) {
-    const clamped = Math.max(-1, Math.min(1, sample));
-    return clamped < 0 ? Math.round(clamped * 32768) : Math.round(clamped * 32767);
-  }
-
-  int16ToFloat(sample) {
-    return sample / (sample < 0 ? 32768 : 32767);
-  }
-
   handleFirmwareBuffer(floatSamples) {
-    const { module, heap16, ptrs, potsPtr, heapF32 } = this.wasmBindings;
-    const {
-      upstreamInPtr,
-      upstreamOutPtr,
-      downstreamInPtr,
-      downstreamOutPtr,
-    } = ptrs;
-
-    const downstreamBase = downstreamInPtr >> 1;
-    const upstreamInBase = upstreamInPtr >> 1;
-    const downstreamOutBase = downstreamOutPtr >> 1;
-    const upstreamOutBase = upstreamOutPtr >> 1;
-
-    for (let i = 0; i < BUFFER_LEN; i++) {
-      heap16[downstreamBase + i] = this.floatToInt16(floatSamples[i]);
-      heap16[upstreamInBase + i] = this.prevDownstreamOut[i];
+    if (!this.chainScheduler) {
+      return;
     }
 
-    module._sim_process_upstream();
-    module._sim_process_downstream();
-
-    for (let i = 0; i < BUFFER_LEN; i++) {
-      this.prevDownstreamOut[i] = heap16[downstreamOutBase + i];
-    }
-
-    const playback = new Float32Array(BUFFER_LEN);
-    for (let i = 0; i < BUFFER_LEN; i++) {
-      playback[i] = this.int16ToFloat(heap16[upstreamOutBase + i]);
-    }
+    const { playback, levels } = this.chainScheduler.processBuffer(
+      floatSamples,
+      this.micEnabled,
+    );
 
     if (this.playbackNode) {
       this.playbackNode.port.postMessage({ type: 'playback', samples: playback });
     }
 
-    const inLevel = this.micEnabled ? peakFloatInterleaved(floatSamples) : 0;
-    const outLevel = peakInt16Interleaved(heap16, upstreamOutBase, BUFFER_LEN);
-    this.onLevels({ in: inLevel, out: outLevel });
-
-    void potsPtr;
-    void heapF32;
+    this.onLevels(levels);
   }
 }

@@ -1,6 +1,6 @@
-# Module Chain Simulator (Phase 0)
+# Module Chain Simulator (Chain MVP)
 
-Browser proof-of-concept that compiles firmware audio modules to WebAssembly and drives them through a real-time Web Audio path. This tree implements **Phase 0 only**; multi-unit chains and production UX are deferred per [`ai/planning/web-module-chain-simulator.md`](../ai/planning/web-module-chain-simulator.md).
+Browser simulator that compiles firmware audio modules to WebAssembly and drives them through a real-time Web Audio chain matching the physical left-to-right module topology. **Phase 1 chain MVP** — gateway I/O card, appendable processing units, full module catalog, per-slot WASM instances, and explicit rightmost loopback. See [`ai/planning/web-module-chain-simulator.md`](../ai/planning/web-module-chain-simulator.md) for Phases 2–3.
 
 ## Prerequisites
 
@@ -21,16 +21,17 @@ Microphone capture requires a secure context (`https://` or `http://localhost`).
 
 ```
 sim/
-├── build-wasm.sh          # Build passthrough + delay artifacts
+├── build-wasm.sh          # Build all five module WASM variants
 ├── verify-wasm.mjs        # Headless WASM smoke checks
 ├── shim/                  # Arduino / ESP32 API stubs for WASM compile
 ├── wasm/
 │   ├── harness.cpp        # Exported setup / upstream / downstream API
 │   └── out/               # Generated .js + .wasm (after build)
 └── host/
-    ├── index.html         # Spike UI (module select, pots, level graphs)
-    ├── main.js            # WASM lifecycle, pot poll loop, level sampler
-    ├── audio-engine.js    # AudioContext + 512-sample accumulator + peak feed
+    ├── index.html         # Chain MVP UI (gateway + unit cards)
+    ├── main.js            # Unit lifecycle, pot poll, level samplers
+    ├── chain-scheduler.js # Multi-slot buffer routing
+    ├── audio-engine.js    # AudioContext + 512-sample accumulator
     ├── level-graph.js     # Scrolling log-scaled peak history (canvas)
     ├── pot-simulator.js   # Firmware-equivalent pot EMA at buffer poll cadence
     └── module-chain-worklet.js
@@ -44,13 +45,15 @@ From the repository root:
 ./sim/build-wasm.sh
 ```
 
-This produces `sim/wasm/out/passthrough.{js,wasm}` and `sim/wasm/out/delay.{js,wasm}`.
+This produces five artifacts under `sim/wasm/out/`:
 
-Delay ring allocation is verified at setup time. Example build output:
-
-```
-Delay module active. Allocated frames=88200 (2000.0 ms)
-```
+| Artifact | Module |
+|----------|--------|
+| `passthrough.{js,wasm}` | Transparent pass-through |
+| `delay.{js,wasm}` | Stereo delay with feedback |
+| `merger.{js,wasm}` | Compressor / merge |
+| `debug_tone.{js,wasm}` | Test tone generator |
+| `cutoff.{js,wasm}` | Low-pass filter |
 
 Run headless checks:
 
@@ -68,70 +71,75 @@ npx serve sim -p 8765
 
 Open [http://localhost:8765/host/](http://localhost:8765/host/).
 
-1. Choose **Passthrough** or **Delay**.
-2. Adjust primary / secondary pot sliders (0–100%). Numeric labels show **smoothed** values; sliders move instantly to the raw target.
-3. Toggle microphone input.
-4. Click **Start audio** (user gesture required for `AudioContext`).
-5. Watch the level graphs while audio runs (see **Level metering** below).
+1. **Gateway** (left card): toggle microphone, start/stop audio.
+2. **Processing units**: module type dropdown (all five kinds), primary/secondary pot sliders, In/Out level graphs.
+3. **Add unit**: append a card to the right (disabled at eight units).
+4. **Loopback** (rightmost unit only): when enabled, that unit's upstream input receives its prior downstream output; default off.
 
-## Audio wiring
+Initial load includes gateway plus one delay unit.
+
+## Chain wiring
 
 - **Sample rate:** 44100 Hz (`SAMPLE_RATE` in firmware `constants.h`).
 - **Buffer size:** 512 interleaved stereo int16 samples per path call (`BUFFER_LEN`).
-- **Path order:** upstream, then downstream (matches firmware `i2sLoop`).
-- **Downstream input:** microphone when enabled; silence when disabled or denied.
-- **Speaker output:** upstream path output.
-- **Single-unit loopback model:** previous buffer’s downstream output feeds the next buffer’s upstream input so effect modules (delay) remain audible on the upstream speaker tap without a multi-unit chain.
+- **Gateway (index 0):** I/O shim only — no WASM, transparent passthrough on both paths.
+- **Processing units (slots 1..N):** one WASM instance per slot; upstream then downstream per unit per buffer, right-to-left sweep order.
+
+| Signal | Source |
+|--------|--------|
+| `ds_in[0]` | Microphone when enabled; silence otherwise |
+| `ds_in[i+1]` | `ds_out[i]` |
+| `us_in[i]` (interior) | `us_out[i+1]` |
+| `us_in[last]` | Prior `ds_out[last]` when loopback on; silence when off |
+| Speakers | `us_out[0]` (gateway upstream output) |
+
+Maximum **eight** processing units beyond the gateway (`MAX_PROCESSING_UNITS` in `chain-scheduler.js`).
+
+## Module catalog
+
+Each unit's dropdown offers: passthrough, delay, merger, cutoff, debug tone. Changing a unit's type re-instantiates that slot's WASM and calls `sim_setup()` without restarting the audio engine. Pot smoothed values reset to current slider positions on type change.
 
 ## Pot controls (firmware-equivalent EMA)
 
-Pot sliders represent the simulated **raw** ADC reading in `[0, 1]`. Smoothed state written to WASM `DualPotsState` uses the same time-scaled exponential moving average as firmware `potsUpdate` in `src/input/pots.h`:
+Pot sliders represent the simulated **raw** ADC reading in `[0, 1]`. Smoothed state written to each slot's WASM `DualPotsState` uses the same time-scaled exponential moving average as firmware `potsUpdate` in `src/input/pots.h`:
 
 - `EMA_ALPHA = 0.008` per millisecond
-- Effective alpha from elapsed milliseconds: `1 - (1 - EMA_ALPHA) ** deltaMs`
 - Poll interval ≈ one I2S buffer period at 44.1 kHz (`512 / 44100` ≈ 11.6 ms)
 
-While dragging a slider, the raw target syncs continuously (animation frame loop); EMA stepping runs only on the poll timer. Modules read `smoothed` fields, so delay length and other mappings ease toward the new position rather than jumping.
+Each unit card owns an independent pot poll loop writing that slot's WASM struct.
 
 ## Level metering
 
-While audio is running, three scrolling peak-history graphs show downstream **In** (blue) and upstream **Out** (orange) on the same canvas:
+Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s / 64 s) for downstream **In** (blue) and upstream **Out** (orange). One peak sample per path per firmware buffer period (~86 Hz).
 
-| Window | Span |
-|--------|------|
-| Fast | 4 s |
-| Medium | 16 s |
-| Slow | 64 s |
+## Limitations
 
-- **Peak cadence:** one linear peak per path per firmware buffer period (~86 Hz), computed in `audio-engine.js` when each 512-sample buffer completes — not on display refresh.
-- **Display refresh:** graphs redraw at 30 Hz; pixel columns advance on peak arrival so horizontal scroll stays stable.
-- **Scale:** logarithmic amplitude with adaptive ceiling (`max(−18 dBFS floor, loudest peak in view)`); Y-axis easing avoids jumps between frames.
+| Area | Chain MVP behavior | Future phase |
+|------|-------------------|--------------|
+| Merger timing | Both paths fed from same buffer period (no inter-path ring delay) | Phase 2 ring decoupling |
+| Startup mute | Not modeled | Phase 2 |
+| Remove unit | Add-only chain | Future UX |
+| Tooling | Shell build + manual serve | Phase 3 npm/CI |
+| Gateway module | I/O shim only | Optional Phase 2 |
 
-Meters advance continuously during playback without restarting the audio engine.
+## Manual acceptance matrix
 
-## Acceptance
+| Scenario | How to verify |
+|----------|---------------|
+| **Passthrough chain** | Add 2–3 units, all passthrough, mic on — speech should pass through with minimal latency; In/Out meters on each unit show activity. |
+| **Delay with loopback** | Single delay unit, enable loopback on rightmost card, mic on — audible repeats; primary pot changes delay time as smoothed value settles. |
+| **Multi-unit mix** | Chain passthrough → merger (or cutoff) → delay; confirm distinct processing per slot and downstream propagation left-to-right. |
+| **Module type swap mid-playback** | Start audio, change one unit from passthrough to debug tone — tone appears without stopping/restarting audio; other units unaffected. |
+
+## Automated acceptance
 
 | Scenario | Evidence |
 |----------|----------|
-| Passthrough + mic path | `verify-wasm.mjs`: impulse on downstream input appears on upstream output after one buffer-period loopback. |
-| Delay + feedback | `verify-wasm.mjs`: 88200-frame (~2000 ms) ring allocates; impulse energy reaches upstream output after fill time. |
-| Pot EMA | `pot-simulator.js` mirrors `pots.h` alpha model; `main.js` polls at `POT_POLL_MS`; labels read `heapF32[smoothed]`. |
-| Level metering | `level-graph.js` dual-path peaks at `AUDIO_PEAK_HZ`; three simultaneous windows; log scale with `MIN_SCALE_LINEAR` floor. |
-| Module re-init | UI `change` handler reloads WASM factory and calls `sim_setup()` per module type. |
+| All five WASM variants | `verify-wasm.mjs`: setup + process smoke for each |
+| Passthrough loopback path | `verify-wasm.mjs`: impulse on downstream → upstream after loopback wiring |
+| Delay ring + feedback | `verify-wasm.mjs`: 88200-frame ring; delayed upstream energy |
+| Debug tone output | `verify-wasm.mjs`: downstream tone energy after process |
+| Pot EMA | `pot-simulator.js` mirrors `pots.h`; per-unit poll in `main.js` |
+| Chain length cap | `MAX_PROCESSING_UNITS = 8`; Add unit disabled at cap |
 
-**Manual browser check:** With mic enabled, speak or tap near the mic — passthrough should sound immediate; delay should produce audible repeats. While delay is active, drag the primary pot and confirm (1) numeric label eases toward the slider, (2) delay time changes audibly as smoothed value settles, (3) In/Out level graphs scroll during playback.
-
-## Limitations and Phase 1 handoff
-
-See [`ai/planning/web-module-chain-simulator.md`](../ai/planning/web-module-chain-simulator.md) for the full roadmap. Spike gaps intentionally left for later phases:
-
-| Area | Phase 0 behavior | Phase 1+ target |
-|------|------------------|-----------------|
-| Chain topology | One virtual unit | Gateway + N units, horizontal UI |
-| Loopback | Implicit one-buffer `ds_out → us_in` | Explicit rightmost-unit toggle |
-| Module catalog | Passthrough + delay only | Full `MODULE_*` dropdown per slot |
-| Merger / neopixel / ADC | Shimmed or unused | Fidelity + timing (Phase 2) |
-| Tooling | Shell build + manual serve | `npm run dev`, CI WASM builds (Phase 3) |
-| Gateway | Collapsed into single unit | Separate I/O card at index 0 |
-
-**Phase 1 should:** reuse `sim/wasm/harness.cpp` pattern, load one WASM instance per chain slot, wire `ds_in[i+1] = ds_out[i]` and optional loopback on the last unit, and add the chain MVP UI described in planning.
+**Manual browser check:** Run the acceptance matrix above on [http://localhost:8765/host/](http://localhost:8765/host/) with `./sim/build-wasm.sh` completed first.

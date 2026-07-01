@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Headless WASM smoke checks for the Phase 0 spike (task 2.3 / 5.1 evidence).
+ * Headless WASM smoke checks for module-chain simulator builds.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,6 +10,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, 'wasm', 'out');
 const SAMPLE_RATE = 44100;
 const BUFFER_LEN = 512;
+
+const VARIANTS = ['passthrough', 'delay', 'merger', 'debug_tone', 'cutoff'];
 
 function instantiateFactory(jsName, wasmName) {
   const jsPath = path.join(OUT, jsName);
@@ -43,13 +45,32 @@ function rms(heap16, ptr) {
   return Math.sqrt(sum / BUFFER_LEN);
 }
 
-async function verifyPassthrough() {
-  const m = await instantiateFactory('passthrough.js', 'passthrough.wasm');
+async function smokeProcess(name) {
+  const m = await instantiateFactory(`${name}.js`, `${name}.wasm`);
   m._sim_setup();
   const dsIn = m._sim_get_downstream_in();
   const dsOut = m._sim_get_downstream_out();
   const usIn = m._sim_get_upstream_in();
   const usOut = m._sim_get_upstream_out();
+
+  writeImpulse(m.HEAP16, dsIn);
+  m.HEAP16.fill(0, usIn >> 1, (usIn >> 1) + BUFFER_LEN);
+  m._sim_process_upstream();
+  m._sim_process_downstream();
+
+  if (typeof m._sim_get_buffer_len !== 'function' || m._sim_get_buffer_len() !== BUFFER_LEN) {
+    throw new Error(`${name}: unexpected buffer length`);
+  }
+  console.log(`PASS ${name}: setup and buffer processing callable`);
+}
+
+async function verifyPassthrough() {
+  const m = await instantiateFactory('passthrough.js', 'passthrough.wasm');
+  m._sim_setup();
+  const dsIn = m._sim_get_downstream_in();
+  const usIn = m._sim_get_upstream_in();
+  const usOut = m._sim_get_upstream_out();
+  const dsOut = m._sim_get_downstream_out();
   let prevDs = new Int16Array(BUFFER_LEN);
 
   for (let b = 0; b < 3; b++) {
@@ -118,17 +139,29 @@ async function verifyDelay() {
     throw new Error('delay did not produce audible energy on upstream output');
   }
   console.log('PASS delay: impulse energy reaches upstream output after buffer periods');
+}
 
-  m.HEAPF32[potBase + 2] = 0.9;
-  writeImpulse(m.HEAP16, dsIn);
+async function verifyDebugTone() {
+  const m = await instantiateFactory('debug_tone.js', 'debug_tone.wasm');
+  m._sim_setup();
+  const dsOut = m._sim_get_downstream_out();
+  m.HEAP16.fill(0, m._sim_get_downstream_in() >> 1, (m._sim_get_downstream_in() >> 1) + BUFFER_LEN);
+  m.HEAP16.fill(0, m._sim_get_upstream_in() >> 1, (m._sim_get_upstream_in() >> 1) + BUFFER_LEN);
   m._sim_process_upstream();
   m._sim_process_downstream();
-  console.log('PASS delay: pot smoothed injection accepted at runtime');
+  if (rms(m.HEAP16, dsOut) < 50) {
+    throw new Error('debug_tone did not generate downstream tone energy');
+  }
+  console.log('PASS debug_tone: generates downstream tone energy');
 }
 
 async function main() {
+  for (const name of VARIANTS) {
+    await smokeProcess(name);
+  }
   await verifyPassthrough();
   await verifyDelay();
+  await verifyDebugTone();
   console.log('All WASM verification checks passed.');
 }
 

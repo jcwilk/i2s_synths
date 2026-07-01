@@ -6,9 +6,6 @@
 #define ACTIVE_MODULE 0
 #endif
 
-#define MODULE_PASSTHROUGH 0
-#define MODULE_DELAY 1
-
 #include "config/constants.h"
 #include "input/pots.h"
 
@@ -16,8 +13,14 @@
 #include "modules/passthrough.h"
 #elif ACTIVE_MODULE == MODULE_DELAY
 #include "modules/delay.h"
+#elif ACTIVE_MODULE == MODULE_MERGER
+#include "modules/merger.h"
+#elif ACTIVE_MODULE == MODULE_DEBUG_TONE
+#include "modules/debug_tone.h"
+#elif ACTIVE_MODULE == MODULE_CUTOFF
+#include "modules/cutoff.h"
 #else
-#error "Spike supports MODULE_PASSTHROUGH or MODULE_DELAY only"
+#error "Unsupported ACTIVE_MODULE for simulator harness"
 #endif
 
 static int16_t g_upstream_in[BUFFER_LEN];

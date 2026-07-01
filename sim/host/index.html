@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Module Chain Simulator — Phase 0 Spike</title>
+  <title>Module Chain Simulator — Chain MVP</title>
   <style>
     :root {
       font-family: system-ui, sans-serif;
@@ -12,12 +12,12 @@
     }
     body {
       margin: 0 auto;
-      max-width: 40rem;
+      max-width: 100%;
       padding: 1.5rem;
     }
     h1 { font-size: 1.25rem; margin-top: 0; }
-    h2 { font-size: 1rem; margin: 1.25rem 0 0.5rem; font-weight: 600; }
-    label { display: block; margin: 0.75rem 0 0.25rem; }
+    h2 { font-size: 0.95rem; margin: 0 0 0.75rem; font-weight: 600; }
+    label { display: block; margin: 0.5rem 0 0.25rem; font-size: 0.85rem; }
     select, button {
       font: inherit;
       padding: 0.4rem 0.6rem;
@@ -26,9 +26,11 @@
       background: #1e2230;
       color: inherit;
     }
-    button { cursor: pointer; margin-top: 1rem; }
+    button { cursor: pointer; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
     input[type="range"] { width: 100%; }
     .row { display: flex; align-items: center; gap: 0.5rem; }
+    .hint { font-size: 0.85rem; color: #9ab; }
     #status {
       margin-top: 1rem;
       padding: 0.75rem;
@@ -36,86 +38,100 @@
       border-radius: 6px;
       font-size: 0.9rem;
     }
-    #delay-info { font-size: 0.85rem; color: #9ab; margin-top: 0.5rem; }
-    .hint { font-size: 0.85rem; color: #9ab; }
+    .chain-row {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 0.75rem;
+      overflow-x: auto;
+      padding-bottom: 0.5rem;
+      margin-top: 1rem;
+    }
+    .chain-card {
+      flex: 0 0 auto;
+      min-width: 14rem;
+      max-width: 16rem;
+      padding: 0.85rem;
+      background: #1a1f2b;
+      border: 1px solid #2a3140;
+      border-radius: 8px;
+    }
+    .chain-card.gateway {
+      border-color: #3a5070;
+      min-width: 11rem;
+    }
+    .chain-card .card-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #8a95a8;
+      margin-bottom: 0.5rem;
+    }
+    .module-info { font-size: 0.8rem; color: #9ab; margin-top: 0.35rem; }
     .level-graphs {
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 0.35rem;
       margin-top: 0.5rem;
     }
     .level-graph {
       width: 100%;
-      height: 7rem;
+      height: 4.5rem;
       display: block;
-      border-radius: 6px;
+      border-radius: 4px;
       border: 1px solid #2a3140;
       background: #141820;
       image-rendering: crisp-edges;
-      image-rendering: -webkit-optimize-contrast;
     }
     .level-legend {
       display: flex;
-      gap: 1rem;
-      font-size: 0.8rem;
+      gap: 0.75rem;
+      font-size: 0.75rem;
       color: #9ab;
-      margin-top: 0.35rem;
+      margin-top: 0.25rem;
     }
     .level-legend span::before {
       content: '';
       display: inline-block;
-      width: 0.65rem;
-      height: 0.65rem;
+      width: 0.55rem;
+      height: 0.55rem;
       border-radius: 2px;
-      margin-right: 0.35rem;
+      margin-right: 0.25rem;
       vertical-align: middle;
     }
     .level-legend .in::before { background: #5eb8ff; }
     .level-legend .out::before { background: #ff8c5a; }
+    .chain-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+    .loopback-row { margin-top: 0.5rem; font-size: 0.85rem; }
   </style>
 </head>
 <body>
-  <h1>Module Chain Simulator (Phase 0)</h1>
-  <p class="hint">Single virtual unit — firmware modules compiled to WebAssembly. Use localhost or HTTPS for microphone access.</p>
+  <h1>Module Chain Simulator (Chain MVP)</h1>
+  <p class="hint">Gateway I/O plus appendable processing units — firmware modules compiled to WebAssembly. Use localhost or HTTPS for microphone access.</p>
 
-  <label for="module-select">Module type</label>
-  <select id="module-select">
-    <option value="passthrough">Passthrough</option>
-    <option value="delay" selected>Delay</option>
-  </select>
-
-  <label for="primary-pot">Primary pot (delay length)</label>
-  <div class="row">
-    <input id="primary-pot" type="range" min="0" max="100" value="50" />
-    <span id="primary-value">50%</span>
+  <div class="chain-row" id="chain-row">
+    <div class="chain-card gateway" id="gateway-card">
+      <div class="card-title">Gateway</div>
+      <div class="row">
+        <input id="mic-toggle" type="checkbox" checked />
+        <label for="mic-toggle" style="margin: 0;">Microphone input</label>
+      </div>
+      <button id="start-btn" type="button" style="margin-top: 0.75rem; width: 100%;">Start audio</button>
+    </div>
+    <div id="units-container"></div>
   </div>
 
-  <label for="secondary-pot">Secondary pot</label>
-  <div class="row">
-    <input id="secondary-pot" type="range" min="0" max="100" value="0" />
-    <span id="secondary-value">0%</span>
+  <div class="chain-controls">
+    <button id="add-unit-btn" type="button">Add unit</button>
+    <span class="hint" id="unit-count-hint"></span>
   </div>
 
-  <div class="row" style="margin-top: 1rem;">
-    <input id="mic-toggle" type="checkbox" checked />
-    <label for="mic-toggle" style="margin: 0;">Microphone input (downstream)</label>
-  </div>
-
-  <button id="start-btn" type="button">Start audio</button>
-
-  <h2>Levels</h2>
-  <p class="hint">One peak per firmware audio buffer (~86/s), graphs redraw at 30 Hz. Log scale auto-ranges to max(−18 dBFS floor, loudest peak in view).</p>
-  <div class="level-legend">
-    <span class="in">In (downstream)</span>
-    <span class="out">Out (upstream)</span>
-  </div>
-  <div class="level-graphs" id="level-graphs">
-    <canvas class="level-graph" id="level-graph-fast" aria-label="Level graph 4 seconds"></canvas>
-    <canvas class="level-graph" id="level-graph-medium" aria-label="Level graph 16 seconds"></canvas>
-    <canvas class="level-graph" id="level-graph-slow" aria-label="Level graph 64 seconds"></canvas>
-  </div>
-
-  <p id="delay-info" hidden></p>
   <div id="status">Loading…</div>
 
   <script type="module" src="./main.js"></script>

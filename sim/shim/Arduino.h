@@ -17,6 +17,10 @@ typedef uint8_t byte;
 
 inline void delay(unsigned long) {}
 
+inline unsigned long millis() { return 0; }
+
+inline void neopixelWrite(int, uint8_t, uint8_t, uint8_t) {}
+
 class HardwareSerial {
 public:
   void begin(unsigned long) {}
@@ -34,7 +38,10 @@ static HardwareSerial Serial;
 
 inline int analogRead(int) { return 0; }
 inline void analogSetAttenuation(int) {}
+inline void analogReadResolution(int) {}
 inline void pinMode(int, int) {}
 inline void digitalWrite(int, int) {}
+
+#define ADC_11db 0
 
 #endif // ARDUINO_H
