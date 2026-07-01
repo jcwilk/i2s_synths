@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Module Chain Simulator — Phase 0 Spike</title>
+  <style>
+    :root {
+      font-family: system-ui, sans-serif;
+      color: #e8e8e8;
+      background: #12141a;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 40rem;
+      padding: 1.5rem;
+    }
+    h1 { font-size: 1.25rem; margin-top: 0; }
+    label { display: block; margin: 0.75rem 0 0.25rem; }
+    select, button {
+      font: inherit;
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #1e2230;
+      color: inherit;
+    }
+    button { cursor: pointer; margin-top: 1rem; }
+    input[type="range"] { width: 100%; }
+    .row { display: flex; align-items: center; gap: 0.5rem; }
+    #status {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: #1a1f2b;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    #delay-info { font-size: 0.85rem; color: #9ab; margin-top: 0.5rem; }
+    .hint { font-size: 0.85rem; color: #9ab; }
+  </style>
+</head>
+<body>
+  <h1>Module Chain Simulator (Phase 0)</h1>
+  <p class="hint">Single virtual unit — firmware modules compiled to WebAssembly. Use localhost or HTTPS for microphone access.</p>
+
+  <label for="module-select">Module type</label>
+  <select id="module-select">
+    <option value="passthrough">Passthrough</option>
+    <option value="delay" selected>Delay</option>
+  </select>
+
+  <label for="primary-pot">Primary pot (delay length)</label>
+  <div class="row">
+    <input id="primary-pot" type="range" min="0" max="100" value="50" />
+    <span id="primary-value">50%</span>
+  </div>
+
+  <label for="secondary-pot">Secondary pot</label>
+  <div class="row">
+    <input id="secondary-pot" type="range" min="0" max="100" value="0" />
+    <span id="secondary-value">0%</span>
+  </div>
+
+  <div class="row" style="margin-top: 1rem;">
+    <input id="mic-toggle" type="checkbox" checked />
+    <label for="mic-toggle" style="margin: 0;">Microphone input (downstream)</label>
+  </div>
+
+  <button id="start-btn" type="button">Start audio</button>
+
+  <p id="delay-info" hidden></p>
+  <div id="status">Loading…</div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
