@@ -24,19 +24,6 @@ class ModuleChainProcessor extends AudioWorkletProcessor {
     };
   }
 
-  downmixInput(inputs) {
-    const input = inputs[0];
-    if (!input || input.length === 0) {
-      return { left: 0, right: 0 };
-    }
-    const ch0 = input[0];
-    const ch1 = input[1] || ch0;
-    if (!ch0 || ch0.length === 0) {
-      return { left: 0, right: 0 };
-    }
-    return { left: ch0[0] || 0, right: (ch1 && ch1[0]) || ch0[0] || 0 };
-  }
-
   process(inputs, outputs) {
     const output = outputs[0];
     if (!output || output.length === 0) {
@@ -55,11 +42,13 @@ class ModuleChainProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    const mic = this.downmixInput(inputs);
+    const input = inputs[0];
+    const ch0 = input && input[0];
+    const ch1 = input && (input[1] || input[0]);
 
     for (let i = 0; i < frames; i++) {
-      const left = this.micEnabled ? mic.left : 0;
-      const right = this.micEnabled ? mic.right : 0;
+      const left = this.micEnabled && ch0 ? ch0[i] : 0;
+      const right = this.micEnabled && ch1 ? ch1[i] : left;
       this.accumulator[this.accumIndex++] = left;
       this.accumulator[this.accumIndex++] = right;
 

@@ -16,6 +16,7 @@
       padding: 1.5rem;
     }
     h1 { font-size: 1.25rem; margin-top: 0; }
+    h2 { font-size: 1rem; margin: 1.25rem 0 0.5rem; font-weight: 600; }
     label { display: block; margin: 0.75rem 0 0.25rem; }
     select, button {
       font: inherit;
@@ -37,6 +38,40 @@
     }
     #delay-info { font-size: 0.85rem; color: #9ab; margin-top: 0.5rem; }
     .hint { font-size: 0.85rem; color: #9ab; }
+    .level-graphs {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .level-graph {
+      width: 100%;
+      height: 7rem;
+      display: block;
+      border-radius: 6px;
+      border: 1px solid #2a3140;
+      background: #141820;
+      image-rendering: crisp-edges;
+      image-rendering: -webkit-optimize-contrast;
+    }
+    .level-legend {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.8rem;
+      color: #9ab;
+      margin-top: 0.35rem;
+    }
+    .level-legend span::before {
+      content: '';
+      display: inline-block;
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 2px;
+      margin-right: 0.35rem;
+      vertical-align: middle;
+    }
+    .level-legend .in::before { background: #5eb8ff; }
+    .level-legend .out::before { background: #ff8c5a; }
   </style>
 </head>
 <body>
@@ -67,6 +102,18 @@
   </div>
 
   <button id="start-btn" type="button">Start audio</button>
+
+  <h2>Levels</h2>
+  <p class="hint">One peak per firmware audio buffer (~86/s), graphs redraw at 30 Hz. Log scale auto-ranges to max(−18 dBFS floor, loudest peak in view).</p>
+  <div class="level-legend">
+    <span class="in">In (downstream)</span>
+    <span class="out">Out (upstream)</span>
+  </div>
+  <div class="level-graphs" id="level-graphs">
+    <canvas class="level-graph" id="level-graph-fast" aria-label="Level graph 4 seconds"></canvas>
+    <canvas class="level-graph" id="level-graph-medium" aria-label="Level graph 16 seconds"></canvas>
+    <canvas class="level-graph" id="level-graph-slow" aria-label="Level graph 64 seconds"></canvas>
+  </div>
 
   <p id="delay-info" hidden></p>
   <div id="status">Loading…</div>

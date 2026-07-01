@@ -28,6 +28,7 @@ COMMON_FLAGS=(
   "-s" "INITIAL_MEMORY=33554432"
   "-s" "ALLOW_MEMORY_GROWTH=1"
   "-s" "MODULARIZE=1"
+  "-s" "EXPORT_ES6=1"
   "-s" "EXPORT_NAME=createSimModule"
   "-s" "ENVIRONMENT=web"
   "-s" "EXPORTED_RUNTIME_METHODS=[\"ccall\",\"cwrap\",\"HEAP16\",\"HEAPF32\"]"
