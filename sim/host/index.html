@@ -135,6 +135,25 @@
       margin-top: 0.75rem;
     }
     .loopback-row { margin-top: 0.5rem; font-size: 0.85rem; }
+    .stress-badge {
+      display: inline-block;
+      margin-top: 0.35rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .stress-badge[data-stress="underrun"] {
+      background: #4a4000;
+      color: #ffd866;
+      border: 1px solid #8a7800;
+    }
+    .stress-badge[data-stress="overrun"] {
+      background: #4a1010;
+      color: #ff8a8a;
+      border: 1px solid #8a2020;
+    }
   </style>
 </head>
 <body>

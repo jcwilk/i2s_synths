@@ -88,10 +88,10 @@ Initial load includes gateway plus one delay unit.
 | Signal | Source |
 |--------|--------|
 | `ds_in[0]` | Microphone when enabled; silence otherwise |
-| `ds_in[i+1]` | `ds_out[i]` |
-| `us_in[i]` (interior) | `us_out[i+1]` |
-| `us_in[last]` | Prior `ds_out[last]` when loopback on; silence when off |
-| Speakers | `us_out[0]` (gateway upstream output) |
+| `ds_in[i+1]` | Prior period `ds_out[i]` |
+| `us_in[i]` (interior) | Prior period `us_out[i+1]` |
+| `us_in[last]` | Prior period `ds_out[last]` when loopback on; silence when off |
+| Speakers | Prior period `us_out[0]` (gateway upstream output) |
 
 Maximum **eight** processing units beyond the gateway (`MAX_PROCESSING_UNITS` in `chain-scheduler.js`).
 
@@ -114,13 +114,15 @@ Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s 
 
 ## Limitations
 
-| Area | Chain MVP behavior | Future phase |
-|------|-------------------|--------------|
-| Merger timing | Both paths fed from same buffer period (no inter-path ring delay) | Phase 2 ring decoupling |
-| Startup mute | Not modeled | Phase 2 |
+| Area | Current behavior | Future phase |
+|------|------------------|--------------|
+| Startup mute | Not modeled (~1 s silence on device boot) | Phase 2 |
+| Render quantum | Web Audio 128-frame render quantum vs 512-sample firmware buffer (no internal ring) | Phase 2 |
 | Remove unit | Add-only chain | Future UX |
 | Tooling | Shell build + manual serve | Phase 3 npm/CI |
 | Gateway module | I/O shim only | Optional Phase 2 |
+
+Merger cross-path timing uses decoupled per-path delay state in the chain host (Phase 2 parity). Merger unit cards show brief **Underrun** / **Overrun** badges when the compiled module triggers those recovery paths.
 
 ## Manual acceptance matrix
 
@@ -129,6 +131,7 @@ Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s 
 | **Passthrough chain** | Add 2–3 units, all passthrough, mic on — speech should pass through with minimal latency; In/Out meters on each unit show activity. |
 | **Delay with loopback** | Single delay unit, enable loopback on rightmost card, mic on — audible repeats; primary pot changes delay time as smoothed value settles. |
 | **Multi-unit mix** | Chain passthrough → merger (or cutoff) → delay; confirm distinct processing per slot and downstream propagation left-to-right. |
+| **Merger loopback latency** | Chain passthrough → merger → delay with loopback on the delay unit; mic on. Confirm merge latency and feedback strength feel stable as pots settle; merger card may flash Underrun while rings fill, then steady state. Secondary pot high should emphasize delayed upstream blend on merger downstream output. |
 | **Module type swap mid-playback** | Start audio, change one unit from passthrough to debug tone — tone appears without stopping/restarting audio; other units unaffected. |
 
 ## Automated acceptance
@@ -139,6 +142,9 @@ Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s 
 | Passthrough loopback path | `verify-wasm.mjs`: impulse on downstream → upstream after loopback wiring |
 | Delay ring + feedback | `verify-wasm.mjs`: 88200-frame ring; delayed upstream energy |
 | Debug tone output | `verify-wasm.mjs`: downstream tone energy after process |
+| Dual-path chain delay | `verify-wasm.mjs`: two-slot passthrough chain; downstream feed delayed one period |
+| Merger chain routing | `verify-wasm.mjs`: passthrough → merger with loopback; delayed blend and forward path |
+| Merger stress export | `verify-wasm.mjs`: harness underrun/overrun flags from compiled merger |
 | Pot EMA | `pot-simulator.js` mirrors `pots.h`; per-unit poll in `main.js` |
 | Chain length cap | `MAX_PROCESSING_UNITS = 8`; Add unit disabled at cap |
 

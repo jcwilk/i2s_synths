@@ -40,6 +40,7 @@ static uint32_t mergerRingHead = 0;         // index of oldest sample
 static uint32_t mergerRingTail = 0;         // index one past newest sample
 static uint32_t mergerRingCountSamples = 0; // number of valid samples in buffer
 static volatile bool mergerFlagOverrunEvent = false;
+static volatile bool mergerFlagUnderrunEvent = false;
 
 #if MERGER_ENABLE_DS_TO_US_FORWARD
 #ifndef MERGER_REV_RING_CAPACITY_MULTIPLIER
@@ -205,6 +206,7 @@ inline void moduleSetup() {
   mergerRingTail = 0;
   mergerRingCountSamples = 0;
   mergerFlagOverrunEvent = false;
+  mergerFlagUnderrunEvent = false;
   memset(mergerRing, 0, sizeof(mergerRing));
 
   mergerCurrentScaleRatio = 1.0f;
@@ -231,7 +233,9 @@ inline void moduleLoopUpstream(int16_t* inputBuffer,
 
   // Handle any overrun event resulting from enqueue
   if (mergerFlagOverrunEvent) {
+#ifndef SIM_BUILD
     mergerFlagOverrunEvent = false;
+#endif
     neopixelSetTimedColor(25, 0, 0, 500, NEOPIXEL_MODE_HOLD); // red flash for overrun
   }
 
@@ -307,6 +311,7 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
 
   // If we encountered underrun, indicate and try to recover by padding buffer with silence
   if (underrunMissing > 0) {
+    mergerFlagUnderrunEvent = true;
     neopixelSetTimedColor(25, 25, 0, 500, NEOPIXEL_MODE_HOLD); // yellow flash for underrun
     mergerRingPrefillSilence(BUFFER_LEN); // add a frame of silence to help stabilize buffer
   }
@@ -320,7 +325,9 @@ inline void moduleLoopDownstream(int16_t* inputBuffer,
 
   // Handle any reverse overrun event resulting from enqueue
   if (mergerRevFlagOverrunEvent) {
+#ifndef SIM_BUILD
     mergerRevFlagOverrunEvent = false;
+#endif
     neopixelSetTimedColor(25, 0, 0, 500, NEOPIXEL_MODE_HOLD); // red flash for overrun
   }
 #endif

@@ -41,6 +41,9 @@ build_variant() {
   if [[ "$name" == "delay" ]]; then
     exports="${exports},_sim_get_delay_buffer_frames"
   fi
+  if [[ "$name" == "merger" ]]; then
+    exports="${exports},_sim_consume_merger_stress"
+  fi
   echo "Building WASM: $name (ACTIVE_MODULE=$module_id)"
   emcc "${COMMON_FLAGS[@]}" \
     -DACTIVE_MODULE="$module_id" \

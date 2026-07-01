@@ -5,11 +5,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  ChainScheduler,
+  BUFFER_LEN,
+  MERGER_STRESS_UNDERRUN,
+  MERGER_STRESS_OVERRUN,
+} from './host/chain-scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, 'wasm', 'out');
 const SAMPLE_RATE = 44100;
-const BUFFER_LEN = 512;
 
 const VARIANTS = ['passthrough', 'delay', 'merger', 'debug_tone', 'cutoff'];
 
@@ -28,6 +33,22 @@ function instantiateFactory(jsName, wasmName) {
   );
 }
 
+function wasmBindings(module) {
+  return {
+    module,
+    heap16: module.HEAP16,
+    heapF32: module.HEAPF32,
+    ptrs: {
+      upstreamInPtr: module._sim_get_upstream_in(),
+      upstreamOutPtr: module._sim_get_upstream_out(),
+      downstreamInPtr: module._sim_get_downstream_in(),
+      downstreamOutPtr: module._sim_get_downstream_out(),
+    },
+    potsPtr: module._sim_get_pots(),
+    bufferLen: module._sim_get_buffer_len(),
+  };
+}
+
 function writeImpulse(heap16, ptr) {
   const base = ptr >> 1;
   for (let i = 0; i < BUFFER_LEN; i++) {
@@ -43,6 +64,12 @@ function rms(heap16, ptr) {
     sum += s * s;
   }
   return Math.sqrt(sum / BUFFER_LEN);
+}
+
+function floatMicImpulse() {
+  const mic = new Float32Array(BUFFER_LEN);
+  mic[0] = 0.85;
+  return mic;
 }
 
 async function smokeProcess(name) {
@@ -155,6 +182,137 @@ async function verifyDebugTone() {
   console.log('PASS debug_tone: generates downstream tone energy');
 }
 
+/** Buffers to push upstream ring past capacity (64 frames in merger.h). */
+const MERGER_RING_OVERFLOW_BUFFERS = 70;
+
+async function verifyMergerStressExport() {
+  const merger = await instantiateFactory('merger.js', 'merger.wasm');
+  merger._sim_setup();
+
+  if (typeof merger._sim_consume_merger_stress !== 'function') {
+    throw new Error('merger WASM missing sim_consume_merger_stress export');
+  }
+
+  merger.HEAP16.fill(0, merger._sim_get_upstream_in() >> 1, (merger._sim_get_upstream_in() >> 1) + BUFFER_LEN);
+  writeImpulse(merger.HEAP16, merger._sim_get_downstream_in());
+  merger._sim_process_downstream();
+
+  const underrunFlags = merger._sim_consume_merger_stress();
+  if ((underrunFlags & MERGER_STRESS_UNDERRUN) === 0) {
+    throw new Error('merger stress export: expected underrun when downstream runs with empty capture ring');
+  }
+
+  for (let i = 0; i < MERGER_RING_OVERFLOW_BUFFERS; i++) {
+    writeImpulse(merger.HEAP16, merger._sim_get_upstream_in());
+    merger._sim_process_upstream();
+  }
+  const overrunFlags = merger._sim_consume_merger_stress();
+  if ((overrunFlags & MERGER_STRESS_OVERRUN) === 0) {
+    throw new Error('merger stress export: expected overrun after sustained upstream capture');
+  }
+  console.log('PASS merger stress export: underrun and overrun flags observable from harness');
+}
+
+async function verifyMergerChainRouting() {
+  const passthrough = await instantiateFactory('passthrough.js', 'passthrough.wasm');
+  const merger = await instantiateFactory('merger.js', 'merger.wasm');
+  passthrough._sim_setup();
+  merger._sim_setup();
+
+  const potBase = merger._sim_get_pots() >> 2;
+  merger.HEAPF32[potBase + 1] = 0.05;
+  merger.HEAPF32[potBase + 2] = 0.05;
+  merger.HEAPF32[potBase + 4] = 1.0;
+  merger.HEAPF32[potBase + 5] = 1.0;
+
+  const scheduler = new ChainScheduler();
+  scheduler.setSlots([
+    { bindings: wasmBindings(passthrough) },
+    { bindings: wasmBindings(merger) },
+  ]);
+  scheduler.setLoopbackEnabled(true);
+
+  let heardDelayedBlend = false;
+  let heardForwardPath = false;
+  const silentMic = new Float32Array(BUFFER_LEN);
+
+  for (let b = 0; b < 96; b++) {
+    const mic = b === 12 ? floatMicImpulse() : silentMic;
+    const { levels, playback } = scheduler.processBuffer(mic, b === 12);
+    const mergerLevel = levels[1];
+    if (b > 40 && mergerLevel?.out > 0.004) {
+      heardDelayedBlend = true;
+    }
+    if (b > 50 && rmsFromFloatPlayback(playback) > 0.002) {
+      heardForwardPath = true;
+    }
+  }
+
+  if (!heardDelayedBlend) {
+    throw new Error('merger chain: delayed upstream blend did not reach downstream output');
+  }
+  if (!heardForwardPath) {
+    throw new Error('merger chain: forward-path energy did not reach gateway playback');
+  }
+  console.log('PASS merger chain: delayed blend and forward-path routing');
+}
+
+function rmsFromFloatPlayback(playback) {
+  let sum = 0;
+  for (let i = 0; i < playback.length; i++) {
+    sum += playback[i] * playback[i];
+  }
+  return Math.sqrt(sum / playback.length) * 32767;
+}
+
+async function verifyDualPathDelay() {
+  const passthroughA = await instantiateFactory('passthrough.js', 'passthrough.wasm');
+  const passthroughB = await instantiateFactory('passthrough.js', 'passthrough.wasm');
+  passthroughA._sim_setup();
+  passthroughB._sim_setup();
+
+  const scheduler = new ChainScheduler();
+  scheduler.setSlots([
+    { bindings: wasmBindings(passthroughA) },
+    { bindings: wasmBindings(passthroughB) },
+  ]);
+  scheduler.setLoopbackEnabled(true);
+
+  let slot0ImpulsePeriod = -1;
+  let slot1ImpulsePeriod = -1;
+  let slot0ReturnEnergyPeriod = -1;
+  const silentMic = new Float32Array(BUFFER_LEN);
+
+  for (let b = 0; b < 16; b++) {
+    const mic = b === 2 ? floatMicImpulse() : silentMic;
+    const { levels } = scheduler.processBuffer(mic, b === 2);
+    if (levels[0]?.in > 0.5 && slot0ImpulsePeriod < 0) {
+      slot0ImpulsePeriod = b;
+    }
+    if (levels[1]?.in > 0.5 && slot1ImpulsePeriod < 0) {
+      slot1ImpulsePeriod = b;
+    }
+    if (levels[0]?.out > 0.5 && slot0ReturnEnergyPeriod < 0) {
+      slot0ReturnEnergyPeriod = b;
+    }
+  }
+
+  if (slot0ImpulsePeriod !== 2) {
+    throw new Error(`dual-path delay: slot 0 expected impulse at period 2, got ${slot0ImpulsePeriod}`);
+  }
+  if (slot1ImpulsePeriod !== 3) {
+    throw new Error(
+      `dual-path delay: slot 1 expected delayed downstream impulse at period 3, got ${slot1ImpulsePeriod}`,
+    );
+  }
+  if (slot0ReturnEnergyPeriod < 4) {
+    throw new Error(
+      `dual-path delay: slot 0 upstream return energy expected after loopback path delay, got period ${slot0ReturnEnergyPeriod}`,
+    );
+  }
+  console.log('PASS dual-path delay: downstream and upstream feeds use separate one-buffer handoffs');
+}
+
 async function main() {
   for (const name of VARIANTS) {
     await smokeProcess(name);
@@ -162,6 +320,9 @@ async function main() {
   await verifyPassthrough();
   await verifyDelay();
   await verifyDebugTone();
+  await verifyDualPathDelay();
+  await verifyMergerStressExport();
+  await verifyMergerChainRouting();
   console.log('All WASM verification checks passed.');
 }
 

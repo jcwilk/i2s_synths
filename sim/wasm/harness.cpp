@@ -74,4 +74,26 @@ EMSCRIPTEN_KEEPALIVE
 int sim_get_delay_buffer_frames() { return g_bufferFrames; }
 #endif
 
+#if ACTIVE_MODULE == MODULE_MERGER
+EMSCRIPTEN_KEEPALIVE
+int sim_consume_merger_stress() {
+  int flags = 0;
+  if (mergerFlagUnderrunEvent) {
+    mergerFlagUnderrunEvent = false;
+    flags |= 1;
+  }
+  if (mergerFlagOverrunEvent) {
+    mergerFlagOverrunEvent = false;
+    flags |= 2;
+  }
+#if MERGER_ENABLE_DS_TO_US_FORWARD
+  if (mergerRevFlagOverrunEvent) {
+    mergerRevFlagOverrunEvent = false;
+    flags |= 4;
+  }
+#endif
+  return flags;
+}
+#endif
+
 } // extern "C"

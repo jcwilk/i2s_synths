@@ -4,18 +4,25 @@ export const SAMPLE_RATE = 44100;
 export const BUFFER_LEN = 512;
 export const MAX_PROCESSING_UNITS = 8;
 
+/** Merger stress flags returned from WASM harness (sim_consume_merger_stress). */
+export const MERGER_STRESS_UNDERRUN = 1;
+export const MERGER_STRESS_OVERRUN = 2;
+export const MERGER_STRESS_REV_OVERRUN = 4;
+
 /**
  * Routes firmware-sized buffers through gateway (index 0) plus N WASM processing slots.
- * Inter-unit downstream links and rightmost loopback use one-buffer delayed handoff
- * (previous period's downstream output), matching Phase 0 single-unit audibility.
+ * Inter-unit downstream links use one-buffer delayed handoff left-to-right; upstream
+ * return-path feeds use separate one-buffer delayed state right-to-left.
  */
 export class ChainScheduler {
   constructor() {
     /** @type {{ bindings: object }[]} */
     this.slots = [];
     this.loopbackEnabled = false;
-    /** @type {Int16Array[]} previous downstream out per slot (loopback + inter-unit ds feed) */
+    /** @type {Int16Array[]} previous downstream out per slot (inter-unit ds feed + loopback) */
     this.prevDsOut = [];
+    /** @type {Int16Array[]} previous upstream out per slot (inter-unit us feed) */
+    this.prevUsOut = [];
     this.gatewayDsIn = new Int16Array(BUFFER_LEN);
     this.gatewayDsOut = new Int16Array(BUFFER_LEN);
     this.gatewayUsIn = new Int16Array(BUFFER_LEN);
@@ -27,8 +34,20 @@ export class ChainScheduler {
     while (this.prevDsOut.length < slots.length) {
       this.prevDsOut.push(new Int16Array(BUFFER_LEN));
     }
+    while (this.prevUsOut.length < slots.length) {
+      this.prevUsOut.push(new Int16Array(BUFFER_LEN));
+    }
     this.prevDsOut.length = slots.length;
+    this.prevUsOut.length = slots.length;
+    this.resetPathDelayState();
+  }
+
+  /** Clear all inter-unit path delay buffers (chain length, order, or module type change). */
+  resetPathDelayState() {
     for (const buf of this.prevDsOut) {
+      buf.fill(0);
+    }
+    for (const buf of this.prevUsOut) {
       buf.fill(0);
     }
   }
@@ -67,7 +86,7 @@ export class ChainScheduler {
   /**
    * @param {Float32Array} micFloatSamples interleaved stereo float from Web Audio
    * @param {boolean} micEnabled
-   * @returns {{ playback: Float32Array, levels: { in: number, out: number }[] }}
+   * @returns {{ playback: Float32Array, levels: { in: number, out: number, stress?: number }[] }}
    */
   processBuffer(micFloatSamples, micEnabled) {
     const n = this.slots.length;
@@ -90,10 +109,13 @@ export class ChainScheduler {
       return { playback: this.gatewayUsOutToFloat(), levels };
     }
 
+    // Speaker playback uses prior-period upstream energy from slot 0 (path delay).
+    const playbackUs = Int16Array.from(this.prevUsOut[0]);
+
     const dsOut = Array.from({ length: n }, () => new Int16Array(BUFFER_LEN));
     const usOut = Array.from({ length: n }, () => new Int16Array(BUFFER_LEN));
 
-    // Right-to-left: upstream return path needs us_out[i+1] before processing slot i.
+    // Right-to-left sweep: upstream inputs come from delayed prevUsOut, not same-period usOut.
     for (let slot = n - 1; slot >= 0; slot--) {
       const { module, heap16, ptrs } = this.slots[slot].bindings;
       const { upstreamInPtr, upstreamOutPtr, downstreamInPtr, downstreamOutPtr } = ptrs;
@@ -114,25 +136,29 @@ export class ChainScheduler {
           this.clearBuffer(heap16, upstreamInPtr);
         }
       } else {
-        this.writeBuffer(heap16, upstreamInPtr, usOut[slot + 1]);
+        this.writeBuffer(heap16, upstreamInPtr, this.prevUsOut[slot + 1]);
       }
 
       module._sim_process_upstream();
       module._sim_process_downstream();
 
+      let stress = 0;
+      if (typeof module._sim_consume_merger_stress === 'function') {
+        stress = module._sim_consume_merger_stress();
+      }
+
       this.copyBuffer(dsOut[slot], heap16, downstreamOutPtr);
       this.copyBuffer(usOut[slot], heap16, upstreamOutPtr);
       this.prevDsOut[slot].set(dsOut[slot]);
+      this.prevUsOut[slot].set(usOut[slot]);
 
       const outLevel = peakInt16Interleaved(heap16, upstreamOutPtr >> 1, BUFFER_LEN);
-      levels[slot] = { in: inLevel, out: outLevel };
+      levels[slot] = { in: inLevel, out: outLevel, stress };
     }
 
     for (let i = 0; i < BUFFER_LEN; i++) {
-      this.gatewayUsIn[i] = usOut[0][i];
-    }
-    for (let i = 0; i < BUFFER_LEN; i++) {
-      this.gatewayUsOut[i] = this.gatewayUsIn[i];
+      this.gatewayUsIn[i] = playbackUs[i];
+      this.gatewayUsOut[i] = playbackUs[i];
     }
 
     return { playback: this.gatewayUsOutToFloat(), levels };

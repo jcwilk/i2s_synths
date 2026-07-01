@@ -1,5 +1,11 @@
 import { SimAudioEngine } from './audio-engine.js';
-import { ChainScheduler, MAX_PROCESSING_UNITS } from './chain-scheduler.js';
+import {
+  ChainScheduler,
+  MAX_PROCESSING_UNITS,
+  MERGER_STRESS_UNDERRUN,
+  MERGER_STRESS_OVERRUN,
+  MERGER_STRESS_REV_OVERRUN,
+} from './chain-scheduler.js';
 import { POT_POLL_MS, applyPotStep } from './pot-simulator.js';
 import {
   LevelGraph,
@@ -142,6 +148,7 @@ class ProcessingUnit {
     this.potTargets = { primary: 0.5, secondary: 0 };
     this.levelGraphs = [];
     this.levelSampler = null;
+    this.stressTimer = null;
 
     this.card = document.createElement('div');
     this.card.className = 'chain-card unit-card';
@@ -166,6 +173,7 @@ class ProcessingUnit {
             <label for="loopback-u${index}" style="margin:0;">Loopback</label>
           </div>
         </div>
+        <div class="stress-badge" hidden aria-live="polite"></div>
         <p class="module-info" hidden></p>
       </div>
       <div class="level-graphs"></div>
@@ -178,6 +186,7 @@ class ProcessingUnit {
     this.secondaryValue = this.card.querySelector('.secondary-value');
     this.loopbackRow = this.card.querySelector('.loopback-row');
     this.loopbackCheckbox = this.card.querySelector('.loopback-toggle');
+    this.stressBadge = this.card.querySelector('.stress-badge');
     this.moduleInfo = this.card.querySelector('.module-info');
     this.levelGraphsContainer = this.card.querySelector('.level-graphs');
 
@@ -282,6 +291,30 @@ class ProcessingUnit {
     } else {
       this.moduleInfo.hidden = true;
     }
+  }
+
+  showMergerStress(stressFlags) {
+    if (!this.stressBadge || !stressFlags) {
+      return;
+    }
+    const isUnderrun = (stressFlags & MERGER_STRESS_UNDERRUN) !== 0;
+    const isOverrun =
+      (stressFlags & MERGER_STRESS_OVERRUN) !== 0 ||
+      (stressFlags & MERGER_STRESS_REV_OVERRUN) !== 0;
+    if (!isUnderrun && !isOverrun) {
+      return;
+    }
+    const kind = isOverrun ? 'overrun' : 'underrun';
+    this.stressBadge.hidden = false;
+    this.stressBadge.dataset.stress = kind;
+    this.stressBadge.textContent = kind === 'overrun' ? 'Overrun' : 'Underrun';
+    if (this.stressTimer !== null) {
+      clearTimeout(this.stressTimer);
+    }
+    this.stressTimer = setTimeout(() => {
+      this.stressBadge.hidden = true;
+      this.stressTimer = null;
+    }, 800);
   }
 
   async loadModule(moduleKey) {
@@ -420,6 +453,9 @@ engine.onLevels = (levels) => {
   for (let i = 0; i < units.length; i++) {
     if (levels[i]) {
       levelSamplers[i]?.feed(levels[i]);
+      if (levels[i].stress) {
+        units[i].showMergerStress(levels[i].stress);
+      }
     }
   }
 };
