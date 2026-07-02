@@ -20,9 +20,9 @@ compile_module() {
   module_define="$(module_define_for "$module")"
 
   echo "==> Compiling ${module} (${module_define})"
+  prepare_sketch_staging "$module_define"
   arduino-cli "${CLI_CONFIG[@]}" compile \
     --fqbn "$FQBN" \
-    --build-property "build.extra_flags=-DACTIVE_MODULE=${module_define}" \
     "$STAGING_DIR"
 }
 
@@ -32,7 +32,6 @@ if [[ $# -ne 1 ]]; then
 fi
 
 require_arduino_cli
-prepare_sketch_staging
 
 target="$1"
 if [[ "$target" == "all" ]]; then

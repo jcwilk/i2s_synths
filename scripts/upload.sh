@@ -23,17 +23,17 @@ fi
 
 require_arduino_cli
 resolve_firmware_port
-prepare_sketch_staging
 
 module="$1"
 module_define="$(module_define_for "$module")"
+prepare_sketch_staging "$module_define"
 
 echo "==> Uploading ${module} to ${FIRMWARE_PORT}"
 echo "Tip: hold BOOT on ESP32-S3-Zero if the port does not appear or upload fails."
 
 arduino-cli "${CLI_CONFIG[@]}" compile \
+  --clean \
   --upload \
   --port "$FIRMWARE_PORT" \
   --fqbn "$FQBN" \
-  --build-property "build.extra_flags=-DACTIVE_MODULE=${module_define}" \
   "$STAGING_DIR"

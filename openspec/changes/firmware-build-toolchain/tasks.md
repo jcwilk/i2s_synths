@@ -1,6 +1,6 @@
 ## 1. Toolchain configuration
 
-- [x] 1.1 Add `arduino-cli.yaml` pinning ESP32-S3-Zero FQBN options (OPI PSRAM, USB CDC on boot, 4MB flash)
+- [x] 1.1 Add `arduino-cli.yaml` pinning ESP32-S3-Zero FQBN options (QSPI PSRAM via Waveshare board profile, USB CDC on boot, 4MB flash)
 - [x] 1.2 Add `.env.example` documenting optional `FIRMWARE_PORT` for upload/monitor (keep `.env` gitignored)
 
 ## 2. Build and upload scripts
@@ -17,7 +17,7 @@
 ## 4. Verification
 
 - [x] 4.1 Run `scripts/build.sh all` (or each module) and confirm clean compile; record output in apply notes
-- [ ] 4.2 With hardware connected: run upload + monitor, confirm serial boot line (e.g. setup complete); record port and output in apply notes — requires human-attested connected ESP32-S3-Zero
+- [x] 4.2 With hardware connected: run upload + monitor, confirm serial boot line (e.g. setup complete); record port and output in apply notes — `/dev/ttyACM0` @ 115200; boot log includes `ESP32-S3-Zero I2S Audio Processing`, `Passthrough module active`, `Setup complete.` (I2S preload timeouts expected with no external clock chain)
 
 ## Explicitly deferred
 

@@ -90,7 +90,7 @@ See [ai/hardware.md](ai/hardware.md) for hardware details.
 
 ### Build and flash
 
-Headless compile and upload for the ESP32-S3-Zero control module (OPI PSRAM, USB CDC, 4MB flash). Module selection is compile-time via the build scripts; the default in `src/config/constants.h` is unchanged for Arduino IDE users.
+Headless compile and upload for the ESP32-S3-Zero control module (QSPI PSRAM, USB CDC on boot, 4MB flash). Module selection is compile-time via the build scripts; the default in `src/config/constants.h` is unchanged for Arduino IDE users.
 
 **Prerequisites**
 

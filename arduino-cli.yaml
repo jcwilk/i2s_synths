@@ -10,6 +10,7 @@ sketch:
   always_export_binaries: false
 
 firmware_build:
-  fqbn: esp32:esp32:esp32s3:PSRAM=opi,CDCOnBoot=cdc,USBMode=hwcdc,FlashSize=4M
+  # Waveshare ESP32-S3-Zero (FH4R2): QSPI PSRAM, native USB CDC on boot (no USB-UART bridge).
+  fqbn: esp32:esp32:waveshare_esp32_s3_zero:PSRAM=enabled,CDCOnBoot=cdc,USBMode=hwcdc
   sketch_name: i2s_synths
   serial_baud: 115200

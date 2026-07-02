@@ -33,10 +33,18 @@ if [[ ! -f "$SKETCH_INO" ]]; then
 fi
 
 prepare_sketch_staging() {
+  local module_define="${1:-}"
+
   rm -rf "$STAGING_DIR"
   mkdir -p "$STAGING_DIR"
   cp "$SKETCH_INO" "${STAGING_DIR}/${SKETCH_NAME}.ino"
   ln -s "${ROOT}/src" "${STAGING_DIR}/src"
+
+  # Per-module defines go in build_opt.h so we do not override build.extra_flags
+  # (which would strip ARDUINO_USB_* and route Serial to UART0 instead of USB CDC).
+  if [[ -n "$module_define" ]]; then
+    printf '%s\n' "-DACTIVE_MODULE=${module_define}" > "${STAGING_DIR}/build_opt.h"
+  fi
 }
 
 require_arduino_cli() {
