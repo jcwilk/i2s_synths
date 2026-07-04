@@ -84,14 +84,14 @@ export function parseAck(buffer) {
 }
 
 export function buildEnterFrame() {
-  const buffer = new ArrayBuffer(BRIDGE_ACK_SIZE);
+  const buffer = new ArrayBuffer(BRIDGE_HEADER_SIZE);
   const view = new DataView(buffer);
   writeHeader(view, 0, BRIDGE_CMD_ENTER);
   return Buffer.from(buffer);
 }
 
 export function buildExitFrame() {
-  const buffer = new ArrayBuffer(BRIDGE_ACK_SIZE);
+  const buffer = new ArrayBuffer(BRIDGE_HEADER_SIZE);
   const view = new DataView(buffer);
   writeHeader(view, 0, BRIDGE_CMD_EXIT);
   return Buffer.from(buffer);

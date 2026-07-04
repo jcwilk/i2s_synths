@@ -7,6 +7,8 @@
 #include "offline_neighbor.h"
 
 static OfflineNeighborState g_offline_neighbor_state;
+static BridgeExchangeRequest g_bridge_request;
+static BridgeExchangeResponse g_bridge_response;
 
 inline bool bridgeReadExact(uint8_t* buffer, size_t length, uint32_t timeoutMs) {
   size_t received = 0;
@@ -64,26 +66,15 @@ inline void bridgeWriteAck(uint8_t command, uint32_t sequence, uint16_t status) 
 }
 
 inline bool bridgeReadExchangeRequest(BridgeExchangeRequest& request) {
-  uint8_t payload[BRIDGE_EXCHANGE_REQUEST_PAYLOAD_SIZE] = {};
-  if (!bridgeReadExact(payload, sizeof(payload), 5000)) {
+  uint8_t* payload = reinterpret_cast<uint8_t*>(&request.sequence);
+  if (!bridgeReadExact(payload, BRIDGE_EXCHANGE_REQUEST_PAYLOAD_SIZE, 5000)) {
     return false;
   }
-
-  size_t offset = 0;
-  memcpy(&request.sequence, payload + offset, sizeof(request.sequence));
-  offset += sizeof(request.sequence);
-  memcpy(request.downstreamIn, payload + offset, sizeof(request.downstreamIn));
-  offset += sizeof(request.downstreamIn);
-  memcpy(request.upstreamIn, payload + offset, sizeof(request.upstreamIn));
-  offset += sizeof(request.upstreamIn);
-  memcpy(&request.primaryControl, payload + offset, sizeof(request.primaryControl));
-  offset += sizeof(request.primaryControl);
-  memcpy(&request.secondaryControl, payload + offset, sizeof(request.secondaryControl));
   return true;
 }
 
 inline void bridgeWriteExchangeResponse(uint8_t command, const BridgeExchangeResponse& response) {
-  uint8_t frame[BRIDGE_EXCHANGE_RESPONSE_SIZE] = {};
+  static uint8_t frame[BRIDGE_EXCHANGE_RESPONSE_SIZE];
   bridgeWriteHeader(frame, command);
   size_t offset = BRIDGE_HEADER_SIZE;
   memcpy(frame + offset, &response.sequence, sizeof(response.sequence));
@@ -97,7 +88,7 @@ inline void bridgeWriteExchangeResponse(uint8_t command, const BridgeExchangeRes
 }
 
 inline void bridgeTransportInit() {
-  g_offline_neighbor_state = offlineNeighborMakeInitial();
+  offlineNeighborMakeInitial(g_offline_neighbor_state);
 }
 
 inline bool bridgeTransportIsActive() {
@@ -122,31 +113,30 @@ inline void bridgeTransportPoll() {
 
   switch (command) {
     case BRIDGE_CMD_ENTER:
-      g_offline_neighbor_state = offlineNeighborEnter(g_offline_neighbor_state);
+      offlineNeighborEnter(g_offline_neighbor_state);
       bridgeWriteAck(BRIDGE_CMD_ENTER, 0, g_offline_neighbor_state.lastStatus);
       break;
 
     case BRIDGE_CMD_EXIT:
-      g_offline_neighbor_state = offlineNeighborExit(g_offline_neighbor_state);
+      offlineNeighborExit(g_offline_neighbor_state);
       bridgeWriteAck(BRIDGE_CMD_EXIT, 0, g_offline_neighbor_state.lastStatus);
       break;
 
     case BRIDGE_CMD_LOOPBACK: {
       if (!g_offline_neighbor_state.active) {
-        g_offline_neighbor_state = offlineNeighborEnter(g_offline_neighbor_state);
+        offlineNeighborEnter(g_offline_neighbor_state);
       }
-      g_offline_neighbor_state = offlineNeighborEnableLoopback(g_offline_neighbor_state);
-      BridgeExchangeRequest request = {};
-      if (!bridgeReadExchangeRequest(request)) {
+      offlineNeighborEnableLoopback(g_offline_neighbor_state);
+      memset(&g_bridge_request, 0, sizeof(g_bridge_request));
+      if (!bridgeReadExchangeRequest(g_bridge_request)) {
         bridgeWriteAck(BRIDGE_CMD_LOOPBACK, 0, BRIDGE_STATUS_ERR_SHORT_READ);
         return;
       }
-      g_offline_neighbor_state = offlineNeighborLoadRequest(g_offline_neighbor_state, request);
-      g_offline_neighbor_state = offlineNeighborProcessExchange(g_offline_neighbor_state);
-      const BridgeExchangeResponse loopbackResponse =
-          offlineNeighborBuildResponse(g_offline_neighbor_state);
-      bridgeWriteExchangeResponse(BRIDGE_CMD_LOOPBACK, loopbackResponse);
-      g_offline_neighbor_state = offlineNeighborDisableLoopback(g_offline_neighbor_state);
+      offlineNeighborLoadRequest(g_offline_neighbor_state, g_bridge_request);
+      offlineNeighborProcessExchange(g_offline_neighbor_state);
+      offlineNeighborBuildResponse(g_offline_neighbor_state, g_bridge_response);
+      bridgeWriteExchangeResponse(BRIDGE_CMD_LOOPBACK, g_bridge_response);
+      offlineNeighborDisableLoopback(g_offline_neighbor_state);
       break;
     }
 
@@ -155,16 +145,15 @@ inline void bridgeTransportPoll() {
         bridgeWriteAck(BRIDGE_CMD_EXCHANGE, 0, BRIDGE_STATUS_ERR_NOT_ACTIVE);
         return;
       }
-      BridgeExchangeRequest exchangeRequest = {};
-      if (!bridgeReadExchangeRequest(exchangeRequest)) {
+      memset(&g_bridge_request, 0, sizeof(g_bridge_request));
+      if (!bridgeReadExchangeRequest(g_bridge_request)) {
         bridgeWriteAck(BRIDGE_CMD_EXCHANGE, 0, BRIDGE_STATUS_ERR_SHORT_READ);
         return;
       }
-      g_offline_neighbor_state = offlineNeighborLoadRequest(g_offline_neighbor_state, exchangeRequest);
-      g_offline_neighbor_state = offlineNeighborProcessExchange(g_offline_neighbor_state);
-      const BridgeExchangeResponse exchangeResponse =
-          offlineNeighborBuildResponse(g_offline_neighbor_state);
-      bridgeWriteExchangeResponse(BRIDGE_CMD_EXCHANGE, exchangeResponse);
+      offlineNeighborLoadRequest(g_offline_neighbor_state, g_bridge_request);
+      offlineNeighborProcessExchange(g_offline_neighbor_state);
+      offlineNeighborBuildResponse(g_offline_neighbor_state, g_bridge_response);
+      bridgeWriteExchangeResponse(BRIDGE_CMD_EXCHANGE, g_bridge_response);
       break;
     }
 

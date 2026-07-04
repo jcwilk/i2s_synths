@@ -49,6 +49,7 @@ static DualPotsState sketch_pots_state;
 void setup() {
   neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
 
+  Serial.setRxBufferSize(8192);
   Serial.begin(115200);
   delay(1000);
   Serial.println("ESP32-S3-Zero I2S Audio Processing");
