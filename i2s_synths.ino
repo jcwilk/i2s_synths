@@ -36,6 +36,8 @@ void moduleLoopDownstream(int16_t* inputBuffer, int16_t* outputBuffer, int sampl
 #include "src/modules/passthrough.h"
 #endif
 
+#include "src/hardware_bridge/usb_transport.h"
+
 unsigned long startup_time = 0;
 static unsigned long accumulatedDeltaMs = 0;
 static unsigned long baseLoopMs = 0;
@@ -59,6 +61,8 @@ void setup() {
 
   // Initialize pots after module setup (ADC configured there)
   sketch_pots_state = potsMakeInitial(POT_PIN_PRIMARY, POT_PIN_SECONDARY);
+
+  bridgeTransportInit();
 
   Serial.println("Setup complete.");
   startup_time = millis();
@@ -87,6 +91,11 @@ void loop() {
   // Update potentiometers using elapsed time scaling
   sketch_pots_state = potsUpdate(sketch_pots_state, (unsigned long)deltaMs);
 #endif
+
+  bridgeTransportPoll();
+  if (bridgeTransportIsActive()) {
+    return;
+  }
 
   // Maintain I2S TX buffer depth (silence during startup, sine afterwards)
   i2sLoop(inStartupMute, sketch_pots_state);
