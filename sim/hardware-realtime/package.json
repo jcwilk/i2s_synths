@@ -1,0 +1,8 @@
+{
+  "name": "hardware-realtime-harness",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "serialport": "^13.0.0"
+  }
+}

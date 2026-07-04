@@ -5,6 +5,7 @@
 #include <string.h>
 #include "../config/constants.h"
 #include "../input/pots.h"
+#include "bridge_audio.h"
 #include "bridge_frame.h"
 
 typedef struct {
@@ -52,20 +53,20 @@ inline void offlineNeighborEnter(OfflineNeighborState& state) {
   state.loopback = false;
   moduleSetup();
   state.lastStatus = BRIDGE_STATUS_OK;
-  Serial.println("offline neighbor: enter");
+  bridgeLog("offline neighbor: enter");
 }
 
 inline void offlineNeighborExit(OfflineNeighborState& state) {
   state.active = false;
   state.loopback = false;
   state.lastStatus = BRIDGE_STATUS_OK;
-  Serial.println("offline neighbor: exit");
+  bridgeLog("offline neighbor: exit");
 }
 
 inline void offlineNeighborEnableLoopback(OfflineNeighborState& state) {
   state.loopback = true;
   state.lastStatus = BRIDGE_STATUS_OK;
-  Serial.println("offline neighbor: loopback self-test");
+  bridgeLog("offline neighbor: loopback self-test");
 }
 
 inline void offlineNeighborDisableLoopback(OfflineNeighborState& state) {
@@ -106,6 +107,7 @@ inline void offlineNeighborBuildResponse(const OfflineNeighborState& state,
   memset(&response, 0, sizeof(response));
   response.sequence = state.sequence;
   response.status = state.lastStatus;
+  response.timestampUs = 0;
   memcpy(response.downstreamOut, state.downstreamOut, sizeof(response.downstreamOut));
   memcpy(response.upstreamOut, state.upstreamOut, sizeof(response.upstreamOut));
 }

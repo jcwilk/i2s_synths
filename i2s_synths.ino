@@ -49,7 +49,7 @@ static DualPotsState sketch_pots_state;
 void setup() {
   neopixelSetTimedColor(20,20, 0, STARTUP_TIME_MS, NEOPIXEL_MODE_LINEAR);
 
-  Serial.setRxBufferSize(8192);
+  Serial.setRxBufferSize(16384);
   Serial.begin(115200);
   delay(1000);
   Serial.println("ESP32-S3-Zero I2S Audio Processing");
@@ -70,6 +70,11 @@ void setup() {
 }
 
 void loop() {
+  bridgeTransportServiceActive();
+  if (bridgeTransportIsActive()) {
+    return;
+  }
+
   // Coherent delta time tracking for UI updates
   unsigned long nowMs = millis();
   if (baseLoopMs == 0) {
@@ -92,11 +97,6 @@ void loop() {
   // Update potentiometers using elapsed time scaling
   sketch_pots_state = potsUpdate(sketch_pots_state, (unsigned long)deltaMs);
 #endif
-
-  bridgeTransportPoll();
-  if (bridgeTransportIsActive()) {
-    return;
-  }
 
   // Maintain I2S TX buffer depth (silence during startup, sine afterwards)
   i2sLoop(inStartupMute, sketch_pots_state);

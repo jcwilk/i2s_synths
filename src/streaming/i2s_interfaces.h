@@ -21,6 +21,8 @@ static i2s_chan_handle_t i2s_rx_d = NULL;
 static I2SPipelineState i2s_pipeline_upstream_state;
 static I2SPipelineState i2s_pipeline_downstream_state;
 
+static bool i2s_neighbors_suspended = false;
+
 static float sine_phase = 0.0f;
 
 // TX sent callback now owned/registered by i2s_output module
@@ -161,7 +163,52 @@ static inline void i2sSetup(I2SPipelineProcessFn downstream_process,
   i2s_pipeline_downstream_state = i2s_pipeline_make_initial(u_states.input_state, d_states.output_state, downstream_process);
 }
 
+static inline void i2sNeighborSuspend() {
+  if (i2s_neighbors_suspended) {
+    return;
+  }
+  if (i2s_tx_u) {
+    i2s_channel_disable(i2s_tx_u);
+  }
+  if (i2s_rx_u) {
+    i2s_channel_disable(i2s_rx_u);
+  }
+  if (i2s_tx_d) {
+    i2s_channel_disable(i2s_tx_d);
+  }
+  if (i2s_rx_d) {
+    i2s_channel_disable(i2s_rx_d);
+  }
+  i2s_neighbors_suspended = true;
+}
+
+static inline void i2sNeighborResume() {
+  if (!i2s_neighbors_suspended) {
+    return;
+  }
+  if (i2s_tx_u) {
+    i2s_channel_enable(i2s_tx_u);
+  }
+  if (i2s_rx_u) {
+    i2s_channel_enable(i2s_rx_u);
+  }
+  if (i2s_tx_d) {
+    i2s_channel_enable(i2s_tx_d);
+  }
+  if (i2s_rx_d) {
+    i2s_channel_enable(i2s_rx_d);
+  }
+  i2s_neighbors_suspended = false;
+}
+
+static inline bool i2sNeighborsSuspended() {
+  return i2s_neighbors_suspended;
+}
+
 static inline void i2sLoop(bool inStartupMute, DualPotsState pots_state) {
+  if (i2s_neighbors_suspended) {
+    return;
+  }
   if (inStartupMute) {
     i2s_pipeline_upstream_state = i2s_pipeline_process_muted(i2s_pipeline_upstream_state);
     i2s_pipeline_downstream_state = i2s_pipeline_process_muted(i2s_pipeline_downstream_state);
