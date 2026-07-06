@@ -2,3 +2,10 @@
 .cache/
 .env
 .build-sketch/
+
+# Node.js (sim harnesses)
+node_modules/
+sim/hardware-offline/package-lock.json
+
+# Ephemeral HW capture outputs (harness run-usb / attestation)
+*.capture.json

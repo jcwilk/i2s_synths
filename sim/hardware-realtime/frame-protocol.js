@@ -9,6 +9,12 @@ export const BRIDGE_CMD_ENTER_USB = 0x11;
 export const BRIDGE_CMD_EXIT_USB = 0x12;
 export const BRIDGE_CMD_EXCHANGE_USB = 0x13;
 export const BRIDGE_CMD_LOOPBACK_USB = 0x14;
+export const BRIDGE_CMD_EXCHANGE_USB_PACK4 = 0x15;
+export const BRIDGE_USB_PACK_PERIODS = 4;
+export const BRIDGE_CMD_EXCHANGE_USB_22K_MONO = 0x16;
+export const SPIKE_SAMPLE_RATE = 22050;
+export const SPIKE_MONO_BUFFER_LEN = 128;
+export const SPIKE_MONO_AUDIO_BYTES = SPIKE_MONO_BUFFER_LEN * 2;
 
 export const BRIDGE_STATUS_OK = 0x0001;
 export const BRIDGE_STATUS_ERR_BAD_MAGIC = 0x0002;
@@ -25,9 +31,20 @@ export const BRIDGE_EXCHANGE_REQUEST_PAYLOAD_SIZE = 4 + BRIDGE_AUDIO_BYTES * 2 +
 export const BRIDGE_EXCHANGE_RESPONSE_PAYLOAD_SIZE = 4 + BRIDGE_AUDIO_BYTES * 2 + 2 + 4;
 export const BRIDGE_EXCHANGE_REQUEST_SIZE = BRIDGE_HEADER_SIZE + BRIDGE_EXCHANGE_REQUEST_PAYLOAD_SIZE;
 export const BRIDGE_EXCHANGE_RESPONSE_SIZE = BRIDGE_HEADER_SIZE + BRIDGE_EXCHANGE_RESPONSE_PAYLOAD_SIZE;
+export const BRIDGE_PACK4_AUDIO_BYTES = BRIDGE_AUDIO_BYTES * BRIDGE_USB_PACK_PERIODS;
+export const BRIDGE_PACK4_REQUEST_PAYLOAD_SIZE = 4 + BRIDGE_PACK4_AUDIO_BYTES * 2 + 8;
+export const BRIDGE_PACK4_RESPONSE_PAYLOAD_SIZE = 4 + BRIDGE_PACK4_AUDIO_BYTES * 2 + 2 + 4;
+export const BRIDGE_PACK4_REQUEST_SIZE = BRIDGE_HEADER_SIZE + BRIDGE_PACK4_REQUEST_PAYLOAD_SIZE;
+export const BRIDGE_PACK4_RESPONSE_SIZE = BRIDGE_HEADER_SIZE + BRIDGE_PACK4_RESPONSE_PAYLOAD_SIZE;
+export const SPIKE_MONO_REQUEST_PAYLOAD_SIZE = 4 + SPIKE_MONO_AUDIO_BYTES * 2 + 8;
+export const SPIKE_MONO_RESPONSE_PAYLOAD_SIZE = 4 + SPIKE_MONO_AUDIO_BYTES * 2 + 2 + 4;
+export const SPIKE_MONO_REQUEST_SIZE = BRIDGE_HEADER_SIZE + SPIKE_MONO_REQUEST_PAYLOAD_SIZE;
+export const SPIKE_MONO_RESPONSE_SIZE = BRIDGE_HEADER_SIZE + SPIKE_MONO_RESPONSE_PAYLOAD_SIZE;
 export const BRIDGE_ACK_SIZE = BRIDGE_HEADER_SIZE + 6;
 
 export const PERIOD_MS = (BUFFER_LEN / 2 / 44100) * 1000;
+export const SPIKE_MONO_PERIOD_MS = (SPIKE_MONO_BUFFER_LEN / SPIKE_SAMPLE_RATE) * 1000;
+export const PACK4_AUDIO_MS = PERIOD_MS * BRIDGE_USB_PACK_PERIODS;
 export const RESPONSE_DEADLINE_MS = PERIOD_MS * 3;
 export const ACCEPTANCE_DURATION_S = 60;
 export const MIN_EXCHANGES = 10000;
@@ -70,6 +87,125 @@ export function buildExchangeRequest({
   offset += 4;
   view.setFloat32(offset, secondary, true);
   return wrapLengthPrefixed(Buffer.from(buffer));
+}
+
+export function buildPack4ExchangeRequest({
+  command = BRIDGE_CMD_EXCHANGE_USB_PACK4,
+  baseSequence,
+  downstreamIn,
+  upstreamIn,
+  primary = 0.5,
+  secondary = 0.5,
+}) {
+  const buffer = new ArrayBuffer(BRIDGE_PACK4_REQUEST_SIZE);
+  const view = new DataView(buffer);
+  const int16 = new Int16Array(buffer);
+  let offset = writeHeader(view, 0, command);
+  view.setUint32(offset, baseSequence >>> 0, true);
+  offset += 4;
+  int16.set(downstreamIn, offset / 2);
+  offset += BRIDGE_PACK4_AUDIO_BYTES;
+  int16.set(upstreamIn, offset / 2);
+  offset += BRIDGE_PACK4_AUDIO_BYTES;
+  view.setFloat32(offset, primary, true);
+  offset += 4;
+  view.setFloat32(offset, secondary, true);
+  return wrapLengthPrefixed(Buffer.from(buffer));
+}
+
+export function deterministicPack4Pattern(baseSequence) {
+  const downstreamIn = new Int16Array(BUFFER_LEN * BRIDGE_USB_PACK_PERIODS);
+  const upstreamIn = new Int16Array(BUFFER_LEN * BRIDGE_USB_PACK_PERIODS);
+  for (let period = 0; period < BRIDGE_USB_PACK_PERIODS; period++) {
+    const { downstreamIn: ds, upstreamIn: us } = deterministicPattern(baseSequence + period);
+    downstreamIn.set(ds, period * BUFFER_LEN);
+    upstreamIn.set(us, period * BUFFER_LEN);
+  }
+  return { downstreamIn, upstreamIn };
+}
+
+export function parsePack4ExchangeResponse(inner) {
+  const buf = Buffer.from(inner);
+  const { command } = parseInnerFrame(buf);
+  let offset = BRIDGE_HEADER_SIZE;
+  const sequence = buf.readUInt32LE(offset);
+  offset += 4;
+  const downstreamOut = new Int16Array(BUFFER_LEN * BRIDGE_USB_PACK_PERIODS);
+  const upstreamOut = new Int16Array(BUFFER_LEN * BRIDGE_USB_PACK_PERIODS);
+  for (let i = 0; i < downstreamOut.length; i++) {
+    downstreamOut[i] = buf.readInt16LE(offset + i * 2);
+  }
+  offset += BRIDGE_PACK4_AUDIO_BYTES;
+  for (let i = 0; i < upstreamOut.length; i++) {
+    upstreamOut[i] = buf.readInt16LE(offset + i * 2);
+  }
+  offset += BRIDGE_PACK4_AUDIO_BYTES;
+  const status = buf.readUInt16LE(offset);
+  offset += 2;
+  const timestampUs = buf.readUInt32LE(offset);
+  return { command, sequence, downstreamOut, upstreamOut, status, timestampUs };
+}
+
+export function buildMono22kExchangeRequest({
+  command = BRIDGE_CMD_EXCHANGE_USB_22K_MONO,
+  sequence,
+  downstreamIn,
+  upstreamIn,
+  primary = 0.5,
+  secondary = 0.5,
+}) {
+  const buffer = new ArrayBuffer(SPIKE_MONO_REQUEST_SIZE);
+  const view = new DataView(buffer);
+  const int16 = new Int16Array(buffer);
+  let offset = writeHeader(view, 0, command);
+  view.setUint32(offset, sequence >>> 0, true);
+  offset += 4;
+  int16.set(downstreamIn, offset / 2);
+  offset += SPIKE_MONO_AUDIO_BYTES;
+  int16.set(upstreamIn, offset / 2);
+  offset += SPIKE_MONO_AUDIO_BYTES;
+  view.setFloat32(offset, primary, true);
+  offset += 4;
+  view.setFloat32(offset, secondary, true);
+  return wrapLengthPrefixed(Buffer.from(buffer));
+}
+
+export function parseMono22kExchangeResponse(inner) {
+  const buf = Buffer.from(inner);
+  const { command } = parseInnerFrame(buf);
+  let offset = BRIDGE_HEADER_SIZE;
+  const sequence = buf.readUInt32LE(offset);
+  offset += 4;
+  const downstreamOut = new Int16Array(SPIKE_MONO_BUFFER_LEN);
+  const upstreamOut = new Int16Array(SPIKE_MONO_BUFFER_LEN);
+  for (let i = 0; i < SPIKE_MONO_BUFFER_LEN; i++) {
+    downstreamOut[i] = buf.readInt16LE(offset + i * 2);
+  }
+  offset += SPIKE_MONO_AUDIO_BYTES;
+  for (let i = 0; i < SPIKE_MONO_BUFFER_LEN; i++) {
+    upstreamOut[i] = buf.readInt16LE(offset + i * 2);
+  }
+  offset += SPIKE_MONO_AUDIO_BYTES;
+  const status = buf.readUInt16LE(offset);
+  offset += 2;
+  const timestampUs = buf.readUInt32LE(offset);
+  return { command, sequence, downstreamOut, upstreamOut, status, timestampUs };
+}
+
+export function deterministicMono22kPattern(sequence) {
+  const downstreamIn = new Int16Array(SPIKE_MONO_BUFFER_LEN);
+  const upstreamIn = new Int16Array(SPIKE_MONO_BUFFER_LEN);
+  let lfsr = (sequence + 1) >>> 0;
+  for (let i = 0; i < SPIKE_MONO_BUFFER_LEN; i++) {
+    lfsr ^= lfsr << 13;
+    lfsr ^= lfsr >>> 17;
+    lfsr ^= lfsr << 5;
+    lfsr >>>= 0;
+    const sample = (lfsr & 0x7fff) - (sequence % 97);
+    downstreamIn[i] = sample;
+    upstreamIn[i] = sample ^ 0x1555;
+  }
+  return { downstreamIn, upstreamIn };
 }
 
 export function buildEnterUsbFrame() {

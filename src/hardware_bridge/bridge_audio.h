@@ -27,7 +27,7 @@ inline Stream& bridgeAudioStream() {
 
 inline void bridgeAudioInit() {
 #if BRIDGE_DUAL_CDC
-  BridgeAudioPort.setRxBufferSize(16384);
+  BridgeAudioPort.setRxBufferSize(32768);
   BridgeAudioPort.begin(115200);
   USB.begin();
 #endif
