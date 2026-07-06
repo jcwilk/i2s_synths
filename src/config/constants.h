@@ -55,9 +55,11 @@
 #define STARTUP_TIME_MS 1000
 
 // I2S std-mode configuration (new driver)
-// Note: BUFFER_LEN counts int16_t samples (interleaved stereo uses 2 samples per frame)
-#define SAMPLE_RATE 44100
-#define BUFFER_LEN 512
+// BUFFER_LEN: mono int16 samples per audio path per buffer period (~5.8 ms at 22.05 kHz).
+// I2S_WIRE_SAMPLES: stereo interleaved samples per DMA period on the physical I2S link.
+#define SAMPLE_RATE 22050
+#define BUFFER_LEN 128
+#define I2S_WIRE_SAMPLES (BUFFER_LEN * 2)
 #define I2S_DMA_BUF_COUNT 8
 #define I2S_MCLK_MULTIPLE I2S_MCLK_MULTIPLE_256
 

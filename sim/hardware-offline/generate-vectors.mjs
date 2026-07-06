@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Generate deterministic offline test vectors and WASM golden references. */
+/** Generate deterministic offline test vectors and WASM golden references (mono 22.05 kHz). */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,35 +9,28 @@ import { runReferenceSequence, referenceToJson } from './reference-runner.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VECTORS_DIR = path.join(__dirname, 'vectors');
 
-function stereoRamp(phase, amplitude = 12000) {
+function monoRamp(phase, amplitude = 12000) {
   const samples = new Array(BUFFER_LEN);
-  for (let i = 0; i < BUFFER_LEN; i += 2) {
-    const frame = (phase * BUFFER_LEN + i) / 2;
-    const value = Math.round((frame % 128) / 127 * amplitude);
-    samples[i] = value;
-    samples[i + 1] = -value;
+  for (let i = 0; i < BUFFER_LEN; i++) {
+    const frame = phase * BUFFER_LEN + i;
+    samples[i] = Math.round((frame % 128) / 127 * amplitude);
   }
   return samples;
 }
 
-function stereoImpulse(position = 0, amplitude = 20000) {
+function monoImpulse(position = 0, amplitude = 20000) {
   const samples = new Array(BUFFER_LEN).fill(0);
   if (position >= 0 && position < BUFFER_LEN) {
     samples[position] = amplitude;
-    if (position + 1 < BUFFER_LEN) {
-      samples[position + 1] = amplitude;
-    }
   }
   return samples;
 }
 
-function stereoSine(phase, amplitude = 14000) {
+function monoSine(phase, amplitude = 14000) {
   const samples = new Array(BUFFER_LEN);
-  for (let i = 0; i < BUFFER_LEN; i += 2) {
+  for (let i = 0; i < BUFFER_LEN; i++) {
     const t = (phase * BUFFER_LEN + i) / BUFFER_LEN;
-    const value = Math.round(Math.sin(t * Math.PI * 2) * amplitude);
-    samples[i] = value;
-    samples[i + 1] = value;
+    samples[i] = Math.round(Math.sin(t * Math.PI * 2) * amplitude);
   }
   return samples;
 }
@@ -48,13 +41,13 @@ function buildPassthroughVector() {
     periods.push({
       primary: 0.5,
       secondary: 0.25,
-      downstreamIn: stereoRamp(period, 10000 + period * 500),
-      upstreamIn: stereoSine(period, 8000),
+      downstreamIn: monoRamp(period, 10000 + period * 500),
+      upstreamIn: monoSine(period, 8000),
     });
   }
   return {
     moduleKind: 'passthrough',
-    description: 'Deterministic non-silent passthrough offline vector',
+    description: 'Deterministic non-silent passthrough offline vector (mono 22.05 kHz)',
     warmupPeriods: 0,
     compareFromPeriod: 0,
     defaultPrimary: 0.5,
@@ -72,7 +65,7 @@ function buildDelayVector() {
     periods.push({
       primary: 0.35,
       secondary: 0.0,
-      downstreamIn: stereoSine(period, period < 4 ? 0 : 6000),
+      downstreamIn: monoSine(period, period < 4 ? 0 : 6000),
       upstreamIn: new Array(BUFFER_LEN).fill(0),
     });
   }
@@ -83,15 +76,15 @@ function buildDelayVector() {
       primary: period < 6 ? 0.35 : 0.55,
       secondary: 0.0,
       downstreamIn: period === 2 || period === 8
-        ? stereoImpulse(0, 22000)
-        : stereoRamp(absolutePeriod, 5000),
-      upstreamIn: stereoSine(absolutePeriod, 3000),
+        ? monoImpulse(0, 22000)
+        : monoRamp(absolutePeriod, 5000),
+      upstreamIn: monoSine(absolutePeriod, 3000),
     });
   }
 
   return {
     moduleKind: 'delay',
-    description: 'Delay offline vector with warm-up fill and length control step',
+    description: 'Delay offline vector with warm-up fill and length control step (mono 22.05 kHz)',
     warmupPeriods,
     compareFromPeriod: warmupPeriods,
     defaultPrimary: 0.35,

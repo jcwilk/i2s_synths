@@ -38,7 +38,7 @@ static bool g_hasStageB = false;      // true if B is active for current loop
 static inline void delayAllocateRing() {
   int framesDesired = DELAY_BUFFER_FRAMES_DEFAULT;
   while (framesDesired >= DELAY_MIN_FRAMES) {
-    size_t bytes = (size_t)framesDesired * 2 * sizeof(int16_t);
+    size_t bytes = (size_t)framesDesired * sizeof(int16_t);
     int16_t* ptr = nullptr;
     if (psramFound()) {
       ptr = (int16_t*)ps_malloc(bytes);
@@ -73,7 +73,7 @@ inline void moduleSetup() {
 }
 
 // --- Fade helpers (kept separate from main loop for clarity) ---
-static inline int frameToSampleIndex(int frameIndex) { return frameIndex * 2; }
+static inline int frameToSampleIndex(int frameIndex) { return frameIndex; }
 static inline int rangeFrameClampCount(int startFrame, int countFrames, int limitFrames) {
   if (startFrame < 0) startFrame = 0;
   if (countFrames < 0) countFrames = 0;
@@ -90,21 +90,19 @@ static inline int delayCrossfadeFrames() {
   return frames;
 }
 
-static inline void delayBlendSaturating(int16_t aL, int16_t aR,
-                                        int16_t bL, int16_t bR,
-                                        int num, int den,
-                                        int16_t& outL, int16_t& outR) {
-  if (den <= 0) { outL = aL; outR = aR; return; }
+static inline void delayBlendSaturating(int16_t a,
+                                        int16_t b,
+                                        int num,
+                                        int den,
+                                        int16_t& out) {
+  if (den <= 0) { out = a; return; }
   if (num < 0) num = 0; if (num > den) num = den;
   const int inv = den - num;
-  int32_t l = (int32_t)aL * inv + (int32_t)bL * num;
-  int32_t r = (int32_t)aR * inv + (int32_t)bR * num;
-  if (l >= 0) l += den / 2; else l -= den / 2;
-  if (r >= 0) r += den / 2; else r -= den / 2;
-  l /= den; r /= den;
-  if (l > 32767) l = 32767; if (l < -32768) l = -32768;
-  if (r > 32767) r = 32767; if (r < -32768) r = -32768;
-  outL = (int16_t)l; outR = (int16_t)r;
+  int32_t v = (int32_t)a * inv + (int32_t)b * num;
+  if (v >= 0) v += den / 2; else v -= den / 2;
+  v /= den;
+  if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+  out = (int16_t)v;
 }
 
 // Mutate buffer range: apply linear fade out to silence over [start, start+count)
@@ -114,12 +112,10 @@ static inline void buffer_apply_fade_out_linear(int16_t* buf, int startFrame, in
   for (int k = 0; k < countFrames; ++k) {
     int num = den - (k + 1); // 1->0 across window
     int si = frameToSampleIndex(startFrame + k);
-    int16_t inL = buf[si + 0];
-    int16_t inR = buf[si + 1];
-    int16_t outL, outR;
-    delayBlendSaturating(inL, inR, 0, 0, num, den, outL, outR);
-    buf[si + 0] = outL;
-    buf[si + 1] = outR;
+    int16_t inS = buf[si];
+    int16_t outS;
+    delayBlendSaturating(inS, 0, num, den, outS);
+    buf[si] = outS;
   }
 }
 
@@ -130,25 +126,20 @@ static inline void buffer_apply_fade_in_linear(int16_t* buf, int startFrame, int
   for (int k = 0; k < countFrames; ++k) {
     int num = (k + 1); // 0->1 across window
     int si = frameToSampleIndex(startFrame + k);
-    int16_t inL = buf[si + 0];
-    int16_t inR = buf[si + 1];
-    int16_t outL, outR;
-    delayBlendSaturating(0, 0, inL, inR, num, den, outL, outR);
-    buf[si + 0] = outL;
-    buf[si + 1] = outR;
+    int16_t inS = buf[si];
+    int16_t outS;
+    delayBlendSaturating(0, inS, num, den, outS);
+    buf[si] = outS;
   }
 }
 
-// Copy a portion of a buffer into a newly allocated buffer (interleaved stereo)
+// Copy a portion of a buffer into a newly allocated buffer (mono)
 static inline int16_t* buffer_copy_alloc(const int16_t* src, int startFrame, int countFrames) {
   if (!src || countFrames <= 0) return nullptr;
-  size_t samples = (size_t)countFrames * 2;
-  int16_t* out = (int16_t*)malloc(sizeof(int16_t) * samples);
+  int16_t* out = (int16_t*)malloc(sizeof(int16_t) * (size_t)countFrames);
   if (!out) return nullptr;
   for (int k = 0; k < countFrames; ++k) {
-    int si = frameToSampleIndex(startFrame + k);
-    out[2 * k + 0] = src[si + 0];
-    out[2 * k + 1] = src[si + 1];
+    out[k] = src[frameToSampleIndex(startFrame + k)];
   }
   return out;
 }
@@ -163,20 +154,16 @@ static inline void buffer_mix_crossfade_linear(int16_t* dst, int dstStartFrame,
     int num = (k + 1);
     int dsi = frameToSampleIndex(dstStartFrame + k);
     int ssi = frameToSampleIndex(srcStartFrame + k);
-    int16_t curL = dst[dsi + 0];
-    int16_t curR = dst[dsi + 1];
-    int16_t srcL = src[ssi + 0];
-    int16_t srcR = src[ssi + 1];
-    int16_t outL, outR;
-    delayBlendSaturating(curL, curR, srcL, srcR, num, den, outL, outR);
-    dst[dsi + 0] = outL;
-    dst[dsi + 1] = outR;
+    int16_t curS = dst[dsi];
+    int16_t srcS = src[ssi];
+    int16_t outS;
+    delayBlendSaturating(curS, srcS, num, den, outS);
+    dst[dsi] = outS;
   }
 }
 
 // Mix a buffer segment into output with a linear ramp (0->1) at step k (0-based)
-static inline void output_mix_linear_from_buffer_segment(int16_t& outL,
-                                                        int16_t& outR,
+static inline void output_mix_linear_from_buffer_segment(int16_t& outS,
                                                         const int16_t* src,
                                                         int srcFrameStart,
                                                         int k,
@@ -185,12 +172,10 @@ static inline void output_mix_linear_from_buffer_segment(int16_t& outL,
   int den = countFrames;
   int num = (k + 1);
   int ssi = frameToSampleIndex(srcFrameStart + k);
-  int16_t srcL = src[ssi + 0];
-  int16_t srcR = src[ssi + 1];
-  int16_t mixedL, mixedR;
-  delayBlendSaturating(outL, outR, srcL, srcR, num, den, mixedL, mixedR);
-  outL = mixedL;
-  outR = mixedR;
+  int16_t srcS = src[ssi];
+  int16_t mixedS;
+  delayBlendSaturating(outS, srcS, num, den, mixedS);
+  outS = mixedS;
 }
 
 // Shorten: pre-bake crossfade at the new end using the tail from the old end
@@ -237,21 +222,16 @@ static inline void delayClearStageBOnWrap(int nextWriteIdx) {
 }
 
 static inline void delayMaybeMixStagedTailIntoOutput(int writeIdx,
-                                                     int16_t& outL,
-                                                     int16_t& outR) {
+                                                     int16_t& outS) {
   if (!g_hasStageB || !g_stageB || g_stageBFrames <= 0) return;
   int startFade = g_spanFrames - g_stageBFrames;
   if (startFade < 0) startFade = 0;
   if (writeIdx < startFade || writeIdx >= g_spanFrames) return;
-  int k = writeIdx - startFade; // 0..g_stageBFrames-1
-  // Add staged buffer sample (already faded) into output with saturation
+  int k = writeIdx - startFade;
   int ssi = frameToSampleIndex(k);
-  int32_t l = (int32_t)outL + (int32_t)g_stageB[ssi + 0];
-  int32_t r = (int32_t)outR + (int32_t)g_stageB[ssi + 1];
-  if (l > 32767) l = 32767; if (l < -32768) l = -32768;
-  if (r > 32767) r = 32767; if (r < -32768) r = -32768;
-  outL = (int16_t)l;
-  outR = (int16_t)r;
+  int32_t v = (int32_t)outS + (int32_t)g_stageB[ssi];
+  if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+  outS = (int16_t)v;
 }
 
 static inline int delayMapPotToSpanFrames(float pot01) {
@@ -281,8 +261,8 @@ static inline void delayUpdateSpan(int newSpanFrames) {
     const int startFrame = oldSpan;
     const int endFrame = newSpanFrames;
     if (g_ring && endFrame > startFrame) {
-      const int startSample = startFrame * 2;
-      const int countSamples = (endFrame - startFrame) * 2;
+      const int startSample = startFrame;
+      const int countSamples = endFrame - startFrame;
       memset(&g_ring[startSample], 0, (size_t)countSamples * sizeof(int16_t));
     }
     // Stage previous tail for a deferred crossfade at the boundary (use newSpan for clamps)
@@ -296,70 +276,52 @@ static inline void delayUpdateSpan(int newSpanFrames) {
   }
 }
 
-static inline void delayProcessDownstream(int16_t* inputBuffer, // interleaved
+static inline void delayProcessDownstream(int16_t* inputBuffer,
                                          int16_t* outputBuffer,
                                          int samplesLength,
                                          DualPotsState pots_state) {
   if (!(samplesLength > 0 && outputBuffer)) return;
   if (!g_ring) {
-    // Allocation failed; passthrough
     if (inputBuffer) memcpy(outputBuffer, inputBuffer, (size_t)samplesLength * sizeof(int16_t));
     else memset(outputBuffer, 0, (size_t)samplesLength * sizeof(int16_t));
     return;
   }
 
-  // Map primary pot with drag/hysteresis: only change when farther than threshold,
-  // and when changing, trail the actual pot by exactly the threshold.
   float potLen01 = potsPrimaryLinear(pots_state);
   float delta = potLen01 - g_effective_length01;
   if (delta > kLengthDragThreshold) {
     g_effective_length01 = potLen01 - kLengthDragThreshold;
   } else if (delta < -kLengthDragThreshold) {
     g_effective_length01 = potLen01 + kLengthDragThreshold;
-  } // else keep previous effective value
+  }
   if (g_effective_length01 < 0.0f) g_effective_length01 = 0.0f;
   if (g_effective_length01 > 1.0f) g_effective_length01 = 1.0f;
   g_targetSpanFrames = delayMapPotToSpanFrames(g_effective_length01);
   if (g_targetSpanFrames != g_spanFrames) {
     delayUpdateSpan(g_targetSpanFrames);
   }
-  // (debug log removed)
 
-  // Process per frame (2 samples per frame)
-  const int frames = samplesLength / 2;
+  const int frames = samplesLength;
   int writeIdx = g_writeFrameIndex;
   const int tapeFrames = g_spanFrames;
-  for (int f = 0, si = 0; f < frames; ++f, si += 2) {
-    // Read-before-write: emit the sample from one loop ago
-    int16_t outL = 0;
-    int16_t outR = 0;
+  for (int f = 0; f < frames; ++f) {
+    int16_t outS = 0;
     if (g_framesWritten >= (uint32_t)tapeFrames) {
-      const int readSi = writeIdx * 2;
-      outL = g_ring[readSi + 0];
-      outR = g_ring[readSi + 1];
+      outS = g_ring[writeIdx];
     }
 
-    // Optionally blend staged B into output as we approach the end of the tape
-    delayMaybeMixStagedTailIntoOutput(writeIdx, outL, outR);
+    delayMaybeMixStagedTailIntoOutput(writeIdx, outS);
 
-    // Write current input (or silence if missing) into the current slot
-    int16_t inL = 0, inR = 0;
+    int16_t inS = 0;
     if (inputBuffer) {
-      inL = inputBuffer[si + 0];
-      inR = inputBuffer[si + 1];
+      inS = inputBuffer[f];
     }
-    const int bufSi = writeIdx * 2;
-    g_ring[bufSi + 0] = inL;
-    g_ring[bufSi + 1] = inR;
+    g_ring[writeIdx] = inS;
+    outputBuffer[f] = outS;
 
-    outputBuffer[si + 0] = outL;
-    outputBuffer[si + 1] = outR;
-
-    // Advance write cursor within the current tape length
     writeIdx++;
     if (writeIdx >= g_spanFrames) writeIdx = 0;
     g_framesWritten++;
-    // Clear staged buffer on wrap so next loop can restage if needed
     delayClearStageBOnWrap(writeIdx);
   }
   g_writeFrameIndex = writeIdx;

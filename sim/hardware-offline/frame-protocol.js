@@ -1,6 +1,7 @@
-/** Shared host↔device binary frame layout for Phase 0 hardware module bridge. */
+/** Shared host↔device binary frame layout for hardware module bridge (mono 22.05 kHz). */
 
-export const BUFFER_LEN = 512;
+export const SAMPLE_RATE = 22050;
+export const BUFFER_LEN = 128;
 export const BRIDGE_MAGIC = 0x31424d48; // 'HMB1' little-endian
 export const BRIDGE_HEADER_SIZE = 6;
 

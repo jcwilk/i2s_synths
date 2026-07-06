@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 1 sustained USB realtime acceptance harness.
+ * Phase 1 sustained USB realtime acceptance harness (mono 22.05 kHz).
  */
 import os from 'node:os';
 import {
@@ -8,7 +8,10 @@ import {
   MIN_EXCHANGES,
   LATENCY_P50_MAX_MS,
   LATENCY_P99_MAX_MS,
+  REALTIME_RATIO_MIN,
   PERIOD_MS,
+  SAMPLE_RATE,
+  BUFFER_LEN,
   RESPONSE_DEADLINE_MS,
   arraysEqual,
   deterministicPattern,
@@ -69,11 +72,14 @@ async function cmdSustained(portPath, durationS) {
   let drops = 0;
   let identityFailures = 0;
   let firstViolation = null;
-  const endAt = performance.now() + durationS * 1000;
-  let nextSendAt = performance.now();
+  let sessionStart = 0;
+  let sessionEnd = 0;
 
   try {
     await enterUsbNeighborMode(port);
+    sessionStart = performance.now();
+    let nextSendAt = sessionStart;
+    const endAt = sessionStart + durationS * 1000;
 
     while (performance.now() < endAt) {
       const now = performance.now();
@@ -115,10 +121,15 @@ async function cmdSustained(portPath, durationS) {
       }
     }
 
+    sessionEnd = performance.now();
     await exitUsbNeighborMode(port);
   } finally {
     await closeAudioPort(port);
   }
+
+  const wallSeconds = sessionEnd > sessionStart ? (sessionEnd - sessionStart) / 1000 : 0;
+  const audioSeconds = (exchanges * BUFFER_LEN) / SAMPLE_RATE;
+  const realtimeRatio = durationS > 0 ? audioSeconds / durationS : 0;
 
   latencies.sort((a, b) => a - b);
   const p50 = percentile(latencies, 50);
@@ -126,6 +137,7 @@ async function cmdSustained(portPath, durationS) {
   const pass = drops === 0
     && identityFailures === 0
     && exchanges >= MIN_EXCHANGES
+    && realtimeRatio >= REALTIME_RATIO_MIN
     && p50 <= LATENCY_P50_MAX_MS
     && p99 <= LATENCY_P99_MAX_MS;
 
@@ -137,9 +149,13 @@ async function cmdSustained(portPath, durationS) {
     exchanges,
     drops,
     identityFailures,
+    realtimeRatio,
+    audioSeconds,
+    wallSeconds,
     latencyMs: { p50, p99, min: latencies[0] ?? 0, max: latencies[latencies.length - 1] ?? 0 },
     thresholds: {
       minExchanges: MIN_EXCHANGES,
+      realtimeRatioMin: REALTIME_RATIO_MIN,
       p50MaxMs: LATENCY_P50_MAX_MS,
       p99MaxMs: LATENCY_P99_MAX_MS,
       periodMs: PERIOD_MS,

@@ -22,6 +22,13 @@ import {
   runLoopbackSelfTest,
   exchangePeriod,
 } from './serial-transport.js';
+import {
+  closeAudioPort,
+  enterUsbNeighborMode,
+  exitUsbNeighborMode,
+  exchangeUsbPeriod,
+  openAudioPort,
+} from '../hardware-realtime/usb-transport.js';
 import { BUFFER_LEN } from './frame-protocol.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,22 +90,22 @@ async function cmdCompareCapture(vectorPath, capturePath, goldenPath) {
 async function cmdRunUsb(vectorPath, portPath) {
   const vector = loadJson(vectorPath);
   const goldenDoc = loadJson(resolveGoldenPath(vectorPath));
-  const port = await openSerialPort(portPath);
   const capture = [];
+  const port = await openAudioPort(portPath);
 
   try {
-    await enterOfflineMode(port);
+    await enterUsbNeighborMode(port);
     for (let period = 0; period < vector.periods.length; period++) {
       const periodSpec = vectorPeriodToTransport(vector.periods[period], vector);
-      const response = await exchangePeriod(port, periodSpec, period);
+      const response = await exchangeUsbPeriod(port, periodSpec, period);
       capture.push({
         downstreamOut: Array.from(response.downstreamOut),
         upstreamOut: Array.from(response.upstreamOut),
       });
     }
-    await exitOfflineMode(port);
+    await exitUsbNeighborMode(port);
   } finally {
-    await closeSerialPort(port);
+    await closeAudioPort(port);
   }
 
   const compareFromPeriod = vector.compareFromPeriod ?? vector.warmupPeriods ?? 0;
@@ -124,7 +131,7 @@ async function cmdLoopbackUsb(portPath) {
   try {
     await enterOfflineMode(port);
     const periodSpec = {
-      downstreamIn: Int16Array.from({ length: BUFFER_LEN }, (_, i) => (i % 2 === 0 ? i * 10 : -i * 10)),
+      downstreamIn: Int16Array.from({ length: BUFFER_LEN }, (_, i) => i * 10),
       upstreamIn: Int16Array.from({ length: BUFFER_LEN }, (_, i) => 1000 + i),
       primary: 0.42,
       secondary: 0.17,

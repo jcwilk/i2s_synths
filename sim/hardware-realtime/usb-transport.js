@@ -12,12 +12,6 @@ import {
   statusIsOk,
   BRIDGE_CMD_EXCHANGE_USB,
   BRIDGE_CMD_LOOPBACK_USB,
-  BRIDGE_CMD_EXCHANGE_USB_PACK4,
-  buildPack4ExchangeRequest,
-  parsePack4ExchangeResponse,
-  BRIDGE_CMD_EXCHANGE_USB_22K_MONO,
-  buildMono22kExchangeRequest,
-  parseMono22kExchangeResponse,
 } from './frame-protocol.js';
 
 const MAGIC_BYTES = Buffer.from([
@@ -219,44 +213,6 @@ export async function exchangeUsbPeriod(port, periodSpec, sequence, command = BR
   const response = parseExchangeResponse(inner);
   if (!statusIsOk(response.status)) {
     throw new Error(`exchange status 0x${response.status.toString(16)} at sequence ${sequence}`);
-  }
-  return { ...response, roundTripMs: receiveAt - sendAt };
-}
-
-export async function exchangeUsbPack4(port, packSpec, baseSequence) {
-  const frame = buildPack4ExchangeRequest({
-    baseSequence,
-    downstreamIn: packSpec.downstreamIn,
-    upstreamIn: packSpec.upstreamIn,
-    primary: packSpec.primary ?? 0.5,
-    secondary: packSpec.secondary ?? 0.5,
-  });
-  const sendAt = performance.now();
-  await writeFrame(port, frame);
-  const inner = await readResponseFrame(port, 30000);
-  const receiveAt = performance.now();
-  const response = parsePack4ExchangeResponse(inner);
-  if (!statusIsOk(response.status)) {
-    throw new Error(`pack4 status 0x${response.status.toString(16)} at base ${baseSequence}`);
-  }
-  return { ...response, roundTripMs: receiveAt - sendAt };
-}
-
-export async function exchangeUsb22kMono(port, periodSpec, sequence) {
-  const frame = buildMono22kExchangeRequest({
-    sequence,
-    downstreamIn: periodSpec.downstreamIn,
-    upstreamIn: periodSpec.upstreamIn,
-    primary: periodSpec.primary ?? 0.5,
-    secondary: periodSpec.secondary ?? 0.5,
-  });
-  const sendAt = performance.now();
-  await writeFrame(port, frame);
-  const inner = await readResponseFrame(port, 15000);
-  const receiveAt = performance.now();
-  const response = parseMono22kExchangeResponse(inner);
-  if (!statusIsOk(response.status)) {
-    throw new Error(`22k-mono status 0x${response.status.toString(16)} at sequence ${sequence}`);
   }
   return { ...response, roundTripMs: receiveAt - sendAt };
 }

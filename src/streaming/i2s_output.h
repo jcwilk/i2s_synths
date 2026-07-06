@@ -94,7 +94,7 @@ static inline I2SOutputState i2s_output_preload_silence(I2SOutputState s) {
   if (!s.tx_handle) return s;
   
   const int buff_count = I2S_DMA_BUF_COUNT / 2;
-  static const int16_t zero_frame[BUFFER_LEN] = {0};
+  static const int16_t zero_frame[I2S_WIRE_SAMPLES] = {0};
   const size_t full_bytes = sizeof(zero_frame);
   for (int i = 0; i < buff_count; i++) {
     I2SOutputWriteOutcome write_outcome = i2s_output_write(s,

@@ -81,7 +81,7 @@ static inline I2SInputReadOutcome i2s_input_read(I2SInputState s,
     reportError("i2s_input_read: rx_handle not set");
     return out;
   }
-  const size_t full_bytes = sizeof(int16_t) * BUFFER_LEN;
+  const size_t full_bytes = sizeof(int16_t) * I2S_WIRE_SAMPLES;
   if (bytes < full_bytes) {
     s.rx_error = true;
     out.state = s;

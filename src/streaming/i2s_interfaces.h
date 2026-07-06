@@ -30,22 +30,20 @@ static float sine_phase = 0.0f;
 static inline void generateSineBuffer(int16_t* buffer, int sampleCount, float frequency, float amplitude) {
   const float sampleRate = (float)SAMPLE_RATE;
   const float phaseIncrement = (2.0f * PI * frequency) / sampleRate;
-  for (int i = 0; i < sampleCount; i+=2) {
+  for (int i = 0; i < sampleCount; ++i) {
     float sample = sinf(sine_phase) * amplitude;
-    int16_t s = (int16_t)sample;
-    buffer[i] = s;
-    buffer[i + 1] = s;
+    buffer[i] = (int16_t)sample;
     sine_phase += phaseIncrement;
     if (sine_phase >= 2.0f * PI) sine_phase -= 2.0f * PI;
   }
 }
 
 // Pipeline processing callback: generate a sine buffer regardless of input
-static inline void pipeline_generate_sine(int16_t* in_stereo_interleaved,
-                                          int16_t* out_stereo_interleaved,
+static inline void pipeline_generate_sine(int16_t* in_mono,
+                                          int16_t* out_mono,
                                           int sampleCount) {
-  (void)in_stereo_interleaved;
-  generateSineBuffer(out_stereo_interleaved, sampleCount, 440.0f, 8000.0f);
+  (void)in_mono;
+  generateSineBuffer(out_mono, sampleCount, 440.0f, 8000.0f);
 }
 
 // Aggregate states for a single interface
@@ -61,7 +59,7 @@ static bool setupI2SOverlap(i2s_port_t port,
                             i2s_chan_handle_t& out_rx,
                             bool preload_tx_zero) {
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(port, role);
-  chan_cfg.dma_frame_num = (uint32_t)(BUFFER_LEN / 2);
+  chan_cfg.dma_frame_num = (uint32_t)BUFFER_LEN;
   chan_cfg.dma_desc_num = (uint32_t)I2S_DMA_BUF_COUNT;
   esp_err_t result = i2s_new_channel(&chan_cfg, &out_tx, &out_rx);
   if (result != ESP_OK) {
