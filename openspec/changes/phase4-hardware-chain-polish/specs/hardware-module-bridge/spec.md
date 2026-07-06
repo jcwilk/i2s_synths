@@ -2,19 +2,19 @@
 
 ### Requirement: Web Serial direct PWA transport
 
-The hardware module bridge PWA integration SHALL support an optional Web Serial direct transport path that exchanges full-rate four-path duplex audio with a connected device without requiring the local bridge server, using the same exchange contract and sample geometry as the bridge relay path, with no downsampling, compression, or mono fallback.
+The hardware module bridge PWA integration SHALL support an optional Web Serial direct transport path that exchanges four-path duplex audio with a connected device without requiring the local bridge server, using the same exchange contract and mono 22.05 kHz sample geometry as the bridge relay path, with no compression.
 
 #### Scenario: Web Serial connect without bridge
 
 - **GIVEN** a Chromium-based browser with Web Serial available and a compatible device attached
 - **WHEN** the operator selects Web Serial transport and completes a successful hardware connect for a designated slot
-- **THEN** the simulator sustains full-rate duplex exchanges directly with the device without a running bridge server
+- **THEN** the simulator sustains duplex exchanges at the universal mono geometry directly with the device without a running bridge server
 
 #### Scenario: Web Serial preserves exchange geometry
 
 - **GIVEN** an active Web Serial hardware session
 - **WHEN** one complete buffer-period exchange completes
-- **THEN** each audio path uses the same full 44.1 kHz stereo int16 geometry as the bridge relay path
+- **THEN** each audio path uses the same 22.05 kHz mono int16 geometry as the bridge relay path
 
 #### Scenario: Web Serial unavailable falls back to bridge guidance
 
@@ -36,7 +36,7 @@ The Web Serial direct transport and the bridge relay transport SHALL provide equ
 
 - **GIVEN** a browser that does not expose Web Serial
 - **WHEN** the operator connects a hardware slot
-- **THEN** sustained relay is available through the bridge transport path at full fidelity
+- **THEN** sustained relay is available through the bridge transport path at the universal mono geometry
 
 ### Requirement: Session reconnect and recovery
 
@@ -52,7 +52,7 @@ The hardware module bridge PWA integration SHALL detect transport or device link
 
 - **GIVEN** a hardware session in degraded state with chain layout and hardware designation unchanged
 - **WHEN** the operator initiates reconnect and the device responds successfully to USB neighbor entry
-- **THEN** full-rate exchanges resume, the session returns to active state, and a full browser restart is not required
+- **THEN** duplex exchanges at the universal mono geometry resume, the session returns to active state, and a full browser restart is not required
 
 #### Scenario: Fatal error prevents silent reconnect loop
 

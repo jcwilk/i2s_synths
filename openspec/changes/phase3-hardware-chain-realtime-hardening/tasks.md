@@ -61,6 +61,6 @@
 - Web Serial direct browser-to-device path, reconnect polish, and runtime I2S-vs-USB mode switching (Phase 4)
 - WiFi transport or alternate non-USB relay paths
 - Multiple simultaneous hardware boards or hardware slots
-- Compression, downsampling, mono fallback, or sample-rate conversion
+- Compression or alternate sample-rate contracts
 - Automated CI hardware farm for 10-minute soaks (manual board attestation sufficient for apply-complete)
 - Merger hardware acceptance with loopback on the hardware unit itself unless S4 investigation warrants a follow-up change

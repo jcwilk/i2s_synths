@@ -2,7 +2,7 @@
 
 ### Requirement: Local bridge server relay
 
-The hardware module bridge SHALL provide a local bridge server process that accepts duplex binary exchanges from the module chain simulator over a WebSocket connection and relays them to a connected ESP32 module over USB using the Phase 1 realtime four-path exchange contract, without altering audio sample geometry or introducing downsampling, compression, or mono fallback.
+The hardware module bridge SHALL provide a local bridge server process that accepts duplex binary exchanges from the module chain simulator over a WebSocket connection and relays them to a connected ESP32 module over USB using the Phase 1 realtime four-path exchange contract, without altering the universal mono 22.05 kHz audio sample geometry or introducing compression.
 
 #### Scenario: WebSocket client connects to bridge
 
@@ -10,11 +10,11 @@ The hardware module bridge SHALL provide a local bridge server process that acce
 - **WHEN** the module chain simulator opens a WebSocket session to the bridge server
 - **THEN** the bridge accepts the session and is ready to relay complete buffer-period exchanges in both directions
 
-#### Scenario: Relay preserves full-rate stereo paths
+#### Scenario: Relay preserves mono path geometry
 
 - **GIVEN** an active WebSocket session and USB neighbor mode on the device
 - **WHEN** the simulator submits one complete exchange for a buffer period
-- **THEN** the device receives downstream and upstream inputs at full 44.1 kHz stereo int16 fidelity and returns downstream and upstream outputs at the same geometry
+- **THEN** the device receives downstream and upstream inputs at 22.05 kHz mono int16 fidelity and returns downstream and upstream outputs at the same geometry
 
 ### Requirement: Single device per bridge session
 

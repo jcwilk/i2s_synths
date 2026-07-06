@@ -1,6 +1,6 @@
 ## Why
 
-Phase 2 proves a single hardware delay slot can participate in a mixed WASM+device chain at full 44.1 kHz stereo fidelity, but short integration runs do not establish production-grade stability under realistic load. Phase 3 hardens sustained full-rate realtime operation so operators can trust extended auditions—long chains, merger loopback topologies, microphone input, and any simulator-supported module kind flashed on the board—without sustained frame drops, unpredictable latency, or chain-halting recovery behavior.
+Phase 2 proves a single hardware delay slot can participate in a mixed WASM+device chain at the universal 22.05 kHz mono geometry, but short integration runs do not establish production-grade stability under realistic load. Phase 3 hardens sustained full-rate realtime operation so operators can trust extended auditions—long chains, merger loopback topologies, microphone input, and any simulator-supported module kind flashed on the board—without sustained frame drops, unpredictable latency, or chain-halting recovery behavior.
 
 ## What Changes
 
@@ -14,7 +14,7 @@ Phase 2 proves a single hardware delay slot can participate in a mixed WASM+devi
 - Web Serial direct browser-to-device path, reconnect polish, or runtime I2S-vs-USB mode switching (Phase 4)
 - WiFi transport or alternate non-USB relay paths
 - Multiple simultaneous hardware boards or hardware slots
-- Compression, downsampling, mono fallback, or sample-rate conversion
+- Compression or alternate sample-rate contracts outside the universal mono 22.05 kHz geometry
 - Replacing Phase 1 host reference tool or Phase 0 offline harness (complementary)
 
 ## Capabilities

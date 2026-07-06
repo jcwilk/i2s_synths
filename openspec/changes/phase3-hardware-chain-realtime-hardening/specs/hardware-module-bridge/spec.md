@@ -7,7 +7,7 @@ The hardware module bridge PWA integration SHALL sustain full-rate duplex exchan
 #### Scenario: Ten-minute soak without sustained drops
 
 - **GIVEN** a connected hardware module, running bridge server, and a mixed chain with the hardware slot active and microphone input enabled
-- **WHEN** audio runs continuously for at least ten minutes at full 44.1 kHz stereo fidelity
+- **WHEN** audio runs continuously for at least ten minutes at 22.05 kHz mono fidelity
 - **THEN** the session completes with zero sustained drop events as defined in the documented acceptance policy
 
 #### Scenario: Maximum-length mixed chain stability
@@ -78,7 +78,7 @@ During an active PWA hardware slot session, the device and bridge relay SHALL su
 
 ### Requirement: All module kinds hardware acceptance
 
-The hardware module bridge PWA integration SHALL include sustained realtime acceptance coverage for each simulator-supported firmware module kind—passthrough, delay, merger, cutoff, and debug tone—when matching firmware is connected, using full 44.1 kHz stereo int16 PCM without downsampling, compression, or mono fallback.
+The hardware module bridge PWA integration SHALL include sustained realtime acceptance coverage for each simulator-supported firmware module kind—passthrough, delay, merger, cutoff, and debug tone—when matching firmware is connected, using 22.05 kHz mono int16 PCM at the universal bridge geometry without compression.
 
 #### Scenario: Passthrough hardware soak
 

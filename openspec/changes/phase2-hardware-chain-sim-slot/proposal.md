@@ -1,6 +1,6 @@
 ## Why
 
-Phase 0 offline A/B and Phase 1 sustained USB duplex prove module parity and transport, but operators still cannot hear real hardware pots and DSP in the context of a mixed WASM+device chain. Phase 2 closes that gap by substituting one browser simulator slot with a physical ESP32 module so audition reflects true ADC control and on-device processing at full 44.1 kHz stereo fidelity alongside neighboring WASM units.
+Phase 0 offline A/B and Phase 1 sustained USB duplex prove module parity and transport at the universal 22.05 kHz mono bridge geometry, but operators still cannot hear real hardware pots and DSP in the context of a mixed WASM+device chain. Phase 2 closes that gap by substituting one browser simulator slot with a physical ESP32 module so audition reflects true ADC control and on-device processing alongside neighboring WASM units at the same mono contract.
 
 ## What Changes
 
@@ -16,7 +16,7 @@ Phase 0 offline A/B and Phase 1 sustained USB duplex prove module parity and tra
 - Web Serial direct browser-to-device path (Phase 4)
 - Full-rate realtime hardening across long mixed chains (Phase 3)
 - Merger module hardware acceptance or exhaustive all-module-type hardware coverage
-- Compression, downsampling, mono fallback, or sample-rate conversion
+- Compression or alternate sample-rate contracts outside the universal mono 22.05 kHz geometry
 - Replacing Phase 0 offline harness or Phase 1 host reference tool (complementary)
 
 ## Capabilities

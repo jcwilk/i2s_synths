@@ -10,7 +10,7 @@ MVP module kind: **delay** — stateful, control-responsive, and representative 
 
 **Goals:**
 
-- Local Node bridge server: WebSocket ↔ USB CDC bulk relay using Phase 1 exchange geometry (512 int16 stereo per path, 44.1 kHz, no compression).
+- Local Node bridge server: WebSocket ↔ USB CDC bulk relay using Phase 1 exchange geometry (128 int16 mono per path, 22.05 kHz, no compression).
 - PWA operator flow: designate one slot as hardware, select delay, connect/disconnect bridge, visible status.
 - Chain scheduler: substitute bridge-mediated exchanges for one slot; bounded async buffers; preserve left-to-right / right-to-left wiring and path-decoupling semantics.
 - Firmware: delay module in USB neighbor mode with **physical ADC** controls when serving PWA hardware slot (distinct from Phase 1 host-injected controls for reference tool).
@@ -23,7 +23,7 @@ MVP module kind: **delay** — stateful, control-responsive, and representative 
 - Multiple hardware slots or multi-board routing.
 - All module types on hardware (merger HW testing deferred).
 - Phase 3 full-chain realtime hardening under worst-case mixed topology.
-- WiFi transport, downsampling, mono, compression.
+- WiFi transport or compression.
 
 ## Decisions
 

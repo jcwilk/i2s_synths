@@ -1,6 +1,6 @@
 ## Context
 
-Phases 0–3 deliver offline parity, full-rate USB duplex, PWA hardware-slot integration via a local bridge server, and sustained mixed-chain realtime hardening at 44.1 kHz stereo with no compression or downsampling. Daily development still requires starting and maintaining a Node bridge process, recovering manually from cable unplug or port contention, and knowing implicitly when to flash for normal I2S chain operation versus USB neighbor dev mode.
+Phases 0–3 deliver offline parity, mono 22.05 kHz USB duplex, PWA hardware-slot integration via a local bridge server, and sustained mixed-chain realtime hardening at the universal mono geometry with no compression. Daily development still requires starting and maintaining a Node bridge process, recovering manually from cable unplug or port contention, and knowing implicitly when to flash for normal I2S chain operation versus USB neighbor dev mode.
 
 Phase 4 adds developer and operator polish: an optional Web Serial direct path for Chromium browsers, reconnect without full browser restart, explicit firmware mode selection, and consolidated operator documentation—while preserving Phase 3 fidelity, recovery, and latency-budget semantics.
 
@@ -20,7 +20,7 @@ Phase 4 adds developer and operator polish: an optional Web Serial direct path f
 
 - WiFi transport or any non-USB relay.
 - Multiple simultaneous hardware boards or hardware slots.
-- Compression, downsampling, mono fallback, sample-rate conversion, or any relaxation of Phase 3 sustained-drop and latency requirements.
+- Compression or any change to the universal mono 22.05 kHz bridge geometry.
 - Preset chain configurations with hardware slot markers (deferred unless apply reveals a natural fit).
 - Replacing Phase 1 host reference tool or Phase 0 offline harness.
 
@@ -28,7 +28,7 @@ Phase 4 adds developer and operator polish: an optional Web Serial direct path f
 
 ### 1. Web Serial versus bridge feature parity matrix
 
-**Choice:** Both transports SHALL relay the same Phase 1 four-path exchange geometry (44.1 kHz stereo int16, fixed per-path sample count, monotonic sequence identifiers) with full PCM fidelity preserved. Feature parity is transport-level only; browser capability determines availability.
+**Choice:** Both transports SHALL relay the same Phase 1 four-path exchange geometry (22.05 kHz mono int16, fixed per-path sample count, monotonic sequence identifiers) with PCM fidelity preserved at the universal contract. Feature parity is transport-level only; browser capability determines availability.
 
 | Capability | Bridge (default) | Web Serial direct |
 |------------|------------------|-------------------|

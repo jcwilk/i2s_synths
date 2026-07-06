@@ -4,7 +4,7 @@
 
 - [ ] 1.1 Create Node bridge server process with WebSocket listener on documented local port and single-client session model
 - [ ] 1.2 Implement USB CDC bulk attachment to Phase 1 binary audio interface with device enter/exit USB neighbor lifecycle on session start/stop
-- [ ] 1.3 Relay complete duplex exchanges transparently (four paths at 512 int16 stereo per path) between WebSocket binary frames and USB without sample-rate or channel conversion
+- [ ] 1.3 Relay complete duplex exchanges transparently (four paths at 128 int16 mono per path, 22.05 kHz) between WebSocket binary frames and USB without sample-rate or channel conversion
 - [ ] 1.4 Expose connection status (bridge reachable, device attached, session active) via control channel messages to the PWA
 - [ ] 1.5 Document bridge start command, default URL, and troubleshooting for offline bridge in bridge README
 
@@ -50,4 +50,4 @@
 - Realtime hardware acceptance for merger, cutoff, debug-tone, and passthrough beyond bridge relay smoke test
 - Phase 3 full-rate realtime hardening for long mixed WASM+HW chains under worst-case load
 - Automated CI hardware farm for integration acceptance (manual board attestation sufficient for Phase 2 apply-complete)
-- WiFi transport, compression, downsampling, or mono fallback
+- WiFi transport or compression

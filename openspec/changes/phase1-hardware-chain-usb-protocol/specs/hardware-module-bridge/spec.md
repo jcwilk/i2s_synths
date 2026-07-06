@@ -1,14 +1,26 @@
+## MODIFIED Requirements
+
+### Requirement: Firmware-equivalent offline buffer geometry
+
+The hardware module bridge offline exchange SHALL use 22.05 kHz sample rate, mono 16-bit signed PCM per audio path, and a fixed per-period sample count matching the firmware streaming buffer length (128 int16 samples per audio path per exchange).
+
+#### Scenario: Buffer geometry matches firmware streaming
+
+- **GIVEN** an offline exchange is configured for a supported module kind
+- **WHEN** one buffer period is submitted to the device and outputs are collected
+- **THEN** each audio path input and output contains exactly the firmware buffer period sample count at the firmware sample rate and mono encoding
+
 ## ADDED Requirements
 
 ### Requirement: Realtime USB duplex buffer geometry
 
-The hardware module bridge realtime exchange SHALL use 44.1 kHz sample rate, stereo interleaved 16-bit signed PCM, and a fixed per-exchange sample count matching the firmware streaming buffer length (512 int16 samples per audio path per exchange), with no downsampling, compression, or mono fallback.
+The hardware module bridge realtime exchange SHALL use 22.05 kHz sample rate, mono 16-bit signed PCM per audio path, and a fixed per-exchange sample count matching the firmware streaming buffer length (128 int16 samples per audio path per exchange), using the same geometry as offline neighbor mode.
 
 #### Scenario: Realtime geometry matches firmware streaming
 
 - **GIVEN** a sustained realtime USB duplex session is active
 - **WHEN** one exchange completes between host and device
-- **THEN** each audio path in the exchange contains exactly the firmware buffer period sample count at full-rate stereo encoding
+- **THEN** each audio path in the exchange contains exactly the firmware buffer period sample count at the mono 22.05 kHz encoding
 
 ### Requirement: Realtime four-path duplex contract
 
@@ -54,7 +66,7 @@ The firmware SHALL support an explicit USB neighbor operating mode in which buff
 
 ### Requirement: Host-driven exchange cadence
 
-The host SHALL act as clock master for realtime exchanges, scheduling submissions at the firmware buffer period cadence derived from the 44.1 kHz sample rate and per-path sample count, and the device SHALL process each complete exchange without requiring alignment to a live audio clock on the device.
+The host SHALL act as clock master for realtime exchanges, scheduling submissions at the firmware buffer period cadence derived from the 22.05 kHz sample rate and per-path sample count, and the device SHALL process each complete exchange without requiring alignment to a live audio clock on the device.
 
 #### Scenario: Sustained cadence over acceptance duration
 
@@ -122,13 +134,19 @@ During sustained realtime acceptance, diagnostic human-readable logging SHALL NO
 
 ### Requirement: Sustained realtime acceptance thresholds
 
-The host reference tool SHALL run a documented sustained acceptance session at firmware buffer cadence for a minimum continuous duration, complete at least the documented minimum exchange count with zero drops, and record round-trip latency percentiles that do not exceed the documented maximum thresholds.
+The host reference tool SHALL run a documented sustained acceptance session at firmware buffer cadence for a minimum continuous duration, complete at least the documented minimum exchange count with zero drops, achieve a realtime ratio of at least one, and record round-trip latency percentiles that do not exceed the documented maximum thresholds.
 
 #### Scenario: Zero-drop sustained run
 
 - **GIVEN** a passthrough firmware build and connected device
 - **WHEN** the host reference tool completes the sustained acceptance session
 - **THEN** the drop count is zero and at least the documented minimum number of exchanges completed
+
+#### Scenario: Realtime ratio at or above unity
+
+- **GIVEN** a successful sustained acceptance session with zero drops
+- **WHEN** audio-time processed is compared to wall-clock session duration
+- **THEN** the realtime ratio is at least one
 
 #### Scenario: Latency within bounds
 
@@ -154,13 +172,13 @@ For passthrough module firmware builds, each realtime exchange during the sustai
 
 ### Requirement: Realtime metrics reporting
 
-The host reference tool SHALL emit a structured summary after a sustained realtime session including exchange count, drop count, latency percentiles, and overall pass or fail against the documented acceptance thresholds.
+The host reference tool SHALL emit a structured summary after a sustained realtime session including exchange count, drop count, realtime ratio, latency percentiles, and overall pass or fail against the documented acceptance thresholds.
 
 #### Scenario: Successful realtime acceptance report
 
-- **GIVEN** all acceptance thresholds are met including zero drops and passthrough identity
+- **GIVEN** all acceptance thresholds are met including zero drops, realtime ratio, and passthrough identity
 - **WHEN** the sustained session ends
-- **THEN** the tool reports overall pass with exchange count and latency summary
+- **THEN** the tool reports overall pass with exchange count, realtime ratio, and latency summary
 
 #### Scenario: Failed realtime acceptance report
 
@@ -176,4 +194,4 @@ The hardware module bridge realtime USB validation SHALL deliver acceptance cove
 
 - **GIVEN** firmware built for the passthrough module kind
 - **WHEN** the documented sustained realtime acceptance session is executed against a connected device
-- **THEN** the host reference tool reports pass under zero-drop, latency, and identity rules
+- **THEN** the host reference tool reports pass under zero-drop, realtime ratio, latency, and identity rules

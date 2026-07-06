@@ -1,137 +1,108 @@
 ## Context
 
-Phase 0 (`phase0-hardware-chain-offline-ab`) defines offline buffer geometry, four-path neighbor contract, dual-path invocation order, and passthrough bit-exact reference comparison. Phase 1 applies the same buffer semantics under realtime USB duplex with the host as clock master. The ESP32-S3-Zero exposes native USB CDC bulk; human-readable logging at 115200 baud must not share the audio binary carrier during acceptance runs.
+Phase 0 (`phase0-hardware-chain-offline-ab`) established offline buffer geometry at 44.1 kHz stereo; Phase 1 spike measurements show that geometry cannot sustain realtime USB duplex on FS CDC (~14 ms RTT vs ~5.8 ms period). A **universal shift to 22.05 kHz mono** (128 int16 samples per path, same ~5.8 ms period) cuts wire bytes ~4× and measured RTT ~4 ms, yielding ~1.5× realtime headroom on the reference host.
 
-Firmware already processes upstream then downstream per buffer period in normal I2S mode. Phase 1 replaces live I2S neighbor capture with host-supplied frames while keeping passthrough module logic unchanged.
+Firmware processes upstream then downstream per buffer period in normal I2S mode. Phase 1 applies the mono contract under realtime USB duplex with the host as clock master. Offline neighbor mode uses the same geometry so simulator, WASM, firmware I2S, and bridge transports stay aligned.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Sustained full-duplex binary exchange at firmware buffer cadence: 44.1 kHz, stereo interleaved int16 PCM, 512 samples per path per exchange (downstream input, upstream input → downstream output, upstream output).
-- Host-driven timing: host schedules exchanges at ~5.8 ms period (512 samples ÷ 44100 Hz); device processes each complete frame as it arrives.
+- **Universal mono 22.05 kHz contract:** 22.05 kHz, mono int16 per path, 128 samples per path per exchange (~5.8 ms period) for offline neighbor, USB realtime, and all downstream phases.
+- Host-driven timing: host schedules exchanges at firmware buffer period cadence; device processes each complete frame as it arrives.
 - USB neighbor firmware mode: I2S to physical chain neighbors disabled; module loop fed from USB frames.
-- Host reference tool measuring sustained rate, round-trip latency, and drop count over a fixed acceptance run.
-- Passthrough acceptance: outputs match inputs on both paths under sustained realtime load (identity modulo documented transport framing).
+- Host reference tool measuring sustained rate, round-trip latency, drop count, and realtime ratio over a fixed acceptance run.
+- Passthrough acceptance: outputs match inputs on both paths under sustained realtime load.
+- Offline harness vectors regenerated; passthrough bit-exact and delay tolerance re-validated at new geometry.
 - Logging coexistence without corrupting the audio binary pipe during acceptance.
 
-**Non-Goals:**
+**Non-goals:**
 
 - PWA chain slot, bridge server, Web Serial, WiFi (Phases 2–4).
-- Delay, merger, cutoff, or debug-tone realtime modules (Phase 0 offline coverage remains; realtime deferred).
-- Compression, downsampling, mono fallback, or sample-rate conversion.
-- Replacing or removing Phase 0 offline harness.
+- Delay realtime modules in USB acceptance (offline delay coverage remains; realtime deferred).
+- Compression or dual-contract support (44.1 kHz stereo retired for bridge/I2S chain).
+- Pack4 or other wire packing experiments (spike showed RTT scales with bytes; smaller payloads win).
 
 ## Decisions
 
-### 1. Realtime frame layout (extends Phase 0 offline frame)
+### 1. Universal buffer geometry
 
-**Choice:** One logical duplex exchange per buffer period. Host→device request and device→host response share the same payload geometry as Phase 0 offline frames:
+**Choice:** One geometry everywhere the firmware chain and bridge exchange audio:
 
-| Field | Size | Notes |
-|-------|------|-------|
-| Magic / version | 2–4 bytes | Protocol identification |
-| Frame type | 1 byte | Data exchange vs control (enter/exit mode, metrics query) |
-| Sequence number | uint32 | Monotonic per exchange; host authoritative |
-| Downstream input | 512 × int16 | Stereo interleaved |
-| Upstream input | 512 × int16 | Stereo interleaved |
-| Primary control | float32 0..1 | Injected; default 0.5 for passthrough acceptance |
-| Secondary control | float32 0..1 | Injected; default 0.5 |
-| Downstream output | 512 × int16 | Device response |
-| Upstream output | 512 × int16 | Device response |
-| Status flags | uint16 | Success, overrun, underrun, sequence gap |
-| Optional timestamp | uint32 | Device local microseconds since stream start (for latency) |
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Sample rate | 22.05 kHz | Standard half-rate of 44.1 kHz |
+| Encoding | Mono int16 per path | One sample per path per time index; not stereo interleaved |
+| Samples per path per exchange | 128 | Matches ~5.8 ms at 22.05 kHz |
+| Paths per exchange | 4 | Downstream in/out, upstream in/out (unchanged semantics) |
+| Period | ~5.8 ms | 128 ÷ 22050 |
 
-On-wire: length-prefixed binary blob per direction on USB CDC bulk endpoint dedicated to audio (separate from logging when possible). CRC16 optional on apply spike; minimum is length + payload bounds check.
+Firmware `SAMPLE_RATE` and `BUFFER_LEN` constants align to this contract. I2S DMA and module loops use the same buffer length.
 
-**Rationale:** Reuses Phase 0 four-path contract; realtime adds sequencing, status, and timing fields only.
+**Rationale:** Spike proved ~3.9× wire reduction vs stereo 44.1 kHz with identical period; simplifies simulator, WASM, offline harness, and USB to one contract.
 
-### 2. Sequencing and host clock mastery
+### 2. Realtime frame layout
 
-**Choice:** Host increments sequence per submitted exchange. Device echoes sequence in response. Device does not self-clock production of output frames; it processes request N and returns response N before accepting N+1 (single in-flight exchange per direction pair, or small fixed-depth queue of depth 2 max for pipelining spike).
+**Choice:** One logical duplex exchange per buffer period. Request/response carry mono path payloads plus controls, sequence, status, optional timestamp—same field semantics as Phase 0 four-path contract but mono sample encoding.
 
-Target cadence: **5.8 ms** nominal (512 ÷ 44100). Host reference tool uses high-resolution sleep/timer to schedule submissions.
+On-wire: length-prefixed binary blob per direction on USB CDC bulk. Inner request ~530 B vs ~2066 B stereo (spike measurement).
 
-**Alternatives considered:** Device-driven cadence — rejected; Phase 2+ PWA chain needs host/master alignment.
+### 3. Sequencing and host clock mastery
 
-### 3. Backpressure and drops
+**Choice:** Host increments sequence per submitted exchange. Device echoes sequence in response. Single in-flight exchange (depth 1) for MVP.
 
-**Choice:**
+Target cadence: **5.8 ms** nominal (128 ÷ 22050).
 
-- If device receive buffer full: device sets overrun status; host counts drop and MAY skip or retry with next sequence (documented policy: retry once then fail acceptance).
-- If host does not receive response within **3× nominal period** (~17.4 ms): host counts late response; three consecutive lates fail acceptance.
-- If sequence gap detected on device: set status flag; host fails acceptance immediately.
+### 4. Backpressure and drops
 
-Depth-1 processing on device (one frame in flight) for MVP; pipelining deferred unless bandwidth headroom insufficient.
+**Choice:** Same as prior Phase 1 design—overrun/underrun status, sequence gap fails session, missing response within **3× nominal period** counts as drop. Host uses a persistent framed reader so partial USB chunks do not desync sessions (spike finding).
 
-### 4. USB neighbor firmware mode
+### 5. USB neighbor firmware mode
 
-**Choice:** Explicit enter/exit lifecycle distinct from offline neighbor mode and normal I2S:
+Unchanged lifecycle from prior design: explicit enter/exit; injected controls during USB mode; passthrough compile target for acceptance.
 
-- **Enter:** Stop I2S DMA to/from physical neighbors; allocate same module buffers; await USB frames; run `moduleLoopUpstream` then `moduleLoopDownstream` per exchange with injected controls (not ADC).
-- **Exit:** Tear down USB stream handler; restore normal I2S neighbor streaming.
-- **Boot default:** Normal I2S unchanged when USB neighbor not entered.
+### 6. Host reference tool
 
-Compile-time passthrough module for Phase 1 acceptance builds.
+Standalone host process: enter USB neighbor, sustained **60 s** acceptance at 5.8 ms cadence, passthrough identity check, metrics summary including **realtime ratio** (audio seconds ÷ wall seconds).
 
-**Rationale:** Mirrors Phase 0 offline mode separation without conflating deterministic offline with realtime clock.
+### 7. Logging coexistence
 
-### 5. Host reference tool (not PWA)
+Dual CDC preferred; single-CDC fallback with binary-only audio during acceptance (spike validated on single CDC).
 
-**Choice:** Standalone host process (language TBD in apply) that:
-
-1. Opens native USB CDC bulk interface for binary audio (platform-specific: `pyserial`/`libusb`/etc.).
-2. Sends enter-USB-neighbor control frame.
-3. Runs **acceptance loop** for **60 seconds** at 5.8 ms cadence: generate deterministic test pattern (e.g., ramp or LFSR on int16 samples), submit frame, await response, verify passthrough identity, record timestamps.
-4. Emits summary: mean/percentile round-trip latency, exchanges completed, drop count, pass/fail.
-
-Not integrated with module chain simulator UI.
-
-### 6. Logging coexistence
-
-**Choice (preferred):** Dual-interface — USB CDC #1 binary audio only; USB CDC #2 or UART at 115200 for `Serial.println` diagnostics. Acceptance runs bind exclusively to audio interface with logging quiesced or redirected to secondary interface.
-
-**Fallback:** Compile flag `USB_AUDIO_EXCLUSIVE` disables all `Serial` output on the audio interface during USB neighbor mode; control/status via binary frame types only.
-
-**Rationale:** ~5.6 Mbps payload needs clean bulk pipe; interleaved text corrupts framing.
-
-### 7. Measured acceptance thresholds
+### 8. Measured acceptance thresholds (mono 22.05 kHz, spike-informed)
 
 | Metric | Threshold | Notes |
 |--------|-----------|-------|
 | Sustained duration | ≥ 60 s continuous | No intentional pauses |
 | Exchange count | ≥ 10,000 completed | ~60 s ÷ 5.8 ms ≈ 10,345 |
-| Drop count | 0 | Overrun, underrun, or missing response |
-| Round-trip latency (p50) | ≤ 12 ms | Host send → response received |
-| Round-trip latency (p99) | ≤ 20 ms | Allows USB jitter |
+| Drop count | 0 | Overrun, underrun, missing response, sequence gap |
+| Realtime ratio | ≥ 1.0 | Audio-time processed ÷ wall-clock duration |
+| Round-trip latency (p50) | ≤ 6 ms | Must stay below buffer period |
+| Round-trip latency (p99) | ≤ 10 ms | USB jitter allowance |
 | Passthrough identity | Bit-exact per exchange | ds_out == ds_in, us_out == us_in |
 | Sequence gaps | 0 | Any gap fails run |
 
-Hardware attestation required for apply-complete on realtime tasks; CI may compile-only.
+Spike reference (30 s, Linux, ESP32-S3-Zero): ~7489 periods, p50 ~3.9 ms, realtime ratio ~1.45×, zero drops.
 
-### 8. Relationship to Phase 0
+### 9. Relationship to Phase 0
 
-**Choice:** Reuse Phase 0 frame field sizes and path order. Phase 0 offline mode remains for A/B parity; USB realtime mode is separate entry command. Transport encoding developed in Phase 0 MAY be shared; realtime adds timing discipline only.
+**Choice:** Phase 1 **replaces** Phase 0 geometry in living spec on archive (MODIFIED requirement). Offline harness vectors and golden files regenerated; delay tolerance rules unchanged in principle, re-run required.
 
 ## Risks / Trade-offs
 
-- **[Risk] USB CDC bandwidth or OS scheduling misses 5.8 ms cadence** → Measure on target host OS; allow ±0.5 ms jitter in scheduler; fail closed on drops.
-- **[Risk] Logging on shared CDC corrupts frames** → Dual-interface or exclusive binary mode; loopback identity test before passthrough module test.
-- **[Risk] Confusion between offline and USB realtime modes** → Distinct enter/exit commands and status reporting; document in harness help.
-- **[Risk] Latency dominated by host USB stack** → Record p50/p99; Phase 3 addresses full-chain hardening; Phase 1 establishes baseline.
-- **[Risk] Single in-flight frame limits throughput headroom** → Acceptable for passthrough MVP; pipelining noted as future optimization.
+- **[Risk] Lower audio bandwidth (22.05 kHz mono)** → Acceptable for dev/harness path; document as intentional trade for USB realtime; physical chain uses same geometry for parity.
+- **[Risk] Vector regeneration misses edge cases** → Re-run full Phase 0 offline acceptance matrix before Phase 1 HW attestation.
+- **[Risk] Simulator/WASM not yet aligned** → Phase 1 tasks include constant alignment; Phase 2 assumes mono contract throughout chain.
 
 ## Migration Plan
 
-1. Approve Phase 1 artifacts.
-2. Apply: firmware USB neighbor mode, binary framing (extend Phase 0 spike), host reference tool.
-3. Compile passthrough build; run loopback/identity on bench.
-4. When board connected: 60 s acceptance run; capture metrics; attestation in tasks.
-5. Rollback: disable USB neighbor entry; normal I2S unaffected.
+1. Approve updated Phase 1 artifacts.
+2. Apply: align firmware constants; merge spike transport into primary USB exchange command; regenerate offline vectors; update host tools.
+3. Re-run offline passthrough + delay acceptance.
+4. Flash passthrough; 60 s USB realtime acceptance.
+5. Archive Phase 1; living spec reflects mono geometry.
 
 ## Open Questions
 
-- Exact USB interface enumeration on Linux/macOS/Windows for dual-CDC vs single-CDC fallback — resolve in apply spike.
-- Whether depth-2 pipelining is needed on Windows hosts — measure before adding complexity.
-- Runtime vs compile-time USB neighbor entry — prefer runtime command matching Phase 0 offline pattern.
-- Whether device timestamp field uses `esp_timer` or frame counter only — either acceptable if latency math documented in harness.
+- Whether I2S physical chain modules already deployed need a one-time reflash note in operator docs (Phase 4).
+- Exact dual-CDC enumeration on each host OS—unchanged from prior Phase 1.

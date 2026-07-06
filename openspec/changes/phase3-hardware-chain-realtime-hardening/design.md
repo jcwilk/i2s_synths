@@ -2,7 +2,7 @@
 
 Phase 0 (`phase0-hardware-chain-offline-ab`) validates module parity offline. Phase 1 (`phase1-hardware-chain-usb-protocol`) proves sustained full-rate USB duplex with host clock mastery and passthrough identity at documented latency thresholds (p50 ≤ 12 ms, p99 ≤ 20 ms, zero drops over 60 s). Phase 2 (`phase2-hardware-chain-sim-slot`) integrates one hardware slot into the module chain simulator via a local bridge server, async ring buffers, and delay-module MVP acceptance (~30 s mixed chain).
 
-Phase 3 closes the gap between "integration works" and "operators can run realistic auditions for 10+ minutes without sustained drops or chain-halting glitches." Stress targets include maximum chain length (gateway plus eight WASM/HW units), merger with loopback and hardware in middle or end positions, microphone on, and any simulator-supported module kind flashed on the board—all at full 44.1 kHz stereo int16 PCM with no downsampling, compression, or mono fallback.
+Phase 3 closes the gap between "integration works" and "operators can run realistic auditions for 10+ minutes without sustained drops or chain-halting glitches." Stress targets include maximum chain length (gateway plus eight WASM/HW units), merger with loopback and hardware in middle or end positions, microphone on, and any simulator-supported module kind flashed on the board—all at the universal 22.05 kHz mono int16 PCM geometry without compression.
 
 ## Goals / Non-Goals
 
@@ -20,7 +20,7 @@ Phase 3 closes the gap between "integration works" and "operators can run realis
 
 - Web Serial direct path, reconnect polish, I2S-vs-USB runtime switch (Phase 4).
 - WiFi transport, multiple simultaneous hardware boards.
-- Compression, downsampling, mono, sample-rate conversion.
+- Compression or alternate sample-rate contracts.
 - Replacing Phase 1 reference tool or Phase 0 offline harness.
 
 ## Decisions

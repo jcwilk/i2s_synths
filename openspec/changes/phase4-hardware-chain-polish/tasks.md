@@ -65,7 +65,7 @@
 
 - WiFi transport or any non-USB relay path
 - Multiple simultaneous hardware boards or hardware slots
-- Compression, downsampling, mono fallback, or sample-rate conversion
+- Compression or any change to the universal mono 22.05 kHz bridge geometry
 - Preset chain configurations with hardware slot marker in JSON save/load (follow-up change unless apply discovers zero-cost fit)
 - Automated CI matrix for Web Serial (manual browser attestation sufficient for apply-complete)
 - 10-minute Phase 3 soak re-run on both transports (Phase 3 attestation remains authoritative; Phase 4 QA matrix uses shorter functional runs)
