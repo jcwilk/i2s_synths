@@ -1,7 +1,8 @@
 import { peakInt16Interleaved } from './level-graph.js';
+import { SAMPLE_RATE, BUFFER_LEN } from '../shared/audio-constants.js';
 
-export const SAMPLE_RATE = 44100;
-export const BUFFER_LEN = 512;
+export { SAMPLE_RATE, BUFFER_LEN };
+
 export const MAX_PROCESSING_UNITS = 8;
 
 /** Merger stress flags returned from WASM harness (sim_consume_merger_stress). */
@@ -9,24 +10,37 @@ export const MERGER_STRESS_UNDERRUN = 1;
 export const MERGER_STRESS_OVERRUN = 2;
 export const MERGER_STRESS_REV_OVERRUN = 4;
 
+/** Hardware underrun indicator for unit cards. */
+export const HARDWARE_STRESS_UNDERRUN = 8;
+
 /**
- * Routes firmware-sized buffers through gateway (index 0) plus N WASM processing slots.
+ * Routes firmware-sized buffers through gateway (index 0) plus N processing slots.
  * Inter-unit downstream links use one-buffer delayed handoff left-to-right; upstream
  * return-path feeds use separate one-buffer delayed state right-to-left.
+ * Hardware slots add ring-buffer pipeline delay (see hardwareAdapter.pipelineDelayPeriods).
  */
 export class ChainScheduler {
   constructor() {
-    /** @type {{ bindings: object }[]} */
+    /** @type {import('./hardware-slot-adapter.js').HardwareSlotAdapter | null} */
+    this.hardwareAdapter = null;
+    /** @type {object[]} */
     this.slots = [];
     this.loopbackEnabled = false;
-    /** @type {Int16Array[]} previous downstream out per slot (inter-unit ds feed + loopback) */
+    /** @type {Int16Array[]} */
     this.prevDsOut = [];
-    /** @type {Int16Array[]} previous upstream out per slot (inter-unit us feed) */
+    /** @type {Int16Array[]} */
     this.prevUsOut = [];
+    /** Extra delay lines for hardware pipeline depth */
+    this.hwDelayDs = [];
+    this.hwDelayUs = [];
     this.gatewayDsIn = new Int16Array(BUFFER_LEN);
     this.gatewayDsOut = new Int16Array(BUFFER_LEN);
     this.gatewayUsIn = new Int16Array(BUFFER_LEN);
     this.gatewayUsOut = new Int16Array(BUFFER_LEN);
+  }
+
+  setHardwareAdapter(adapter) {
+    this.hardwareAdapter = adapter;
   }
 
   setSlots(slots) {
@@ -37,18 +51,31 @@ export class ChainScheduler {
     while (this.prevUsOut.length < slots.length) {
       this.prevUsOut.push(new Int16Array(BUFFER_LEN));
     }
+    while (this.hwDelayDs.length < slots.length) {
+      this.hwDelayDs.push([]);
+    }
+    while (this.hwDelayUs.length < slots.length) {
+      this.hwDelayUs.push([]);
+    }
     this.prevDsOut.length = slots.length;
     this.prevUsOut.length = slots.length;
+    this.hwDelayDs.length = slots.length;
+    this.hwDelayUs.length = slots.length;
     this.resetPathDelayState();
   }
 
-  /** Clear all inter-unit path delay buffers (chain length, order, or module type change). */
   resetPathDelayState() {
     for (const buf of this.prevDsOut) {
       buf.fill(0);
     }
     for (const buf of this.prevUsOut) {
       buf.fill(0);
+    }
+    for (const lines of this.hwDelayDs) {
+      lines.length = 0;
+    }
+    for (const lines of this.hwDelayUs) {
+      lines.length = 0;
     }
   }
 
@@ -83,19 +110,38 @@ export class ChainScheduler {
     heap16.fill(0, ptr >> 1, (ptr >> 1) + BUFFER_LEN);
   }
 
+  isHardwareSlot(slot) {
+    return !!(slot.hardwareDesignated && slot.hardwareConnected && this.hardwareAdapter);
+  }
+
+  pushHardwareDelay(slotIndex, dsBuf, usBuf) {
+    const depth = this.hardwareAdapter?.pipelineDelayPeriods ?? 2;
+    const dsLines = this.hwDelayDs[slotIndex];
+    const usLines = this.hwDelayUs[slotIndex];
+    dsLines.push(Int16Array.from(dsBuf));
+    usLines.push(Int16Array.from(usBuf));
+    while (dsLines.length > depth) {
+      dsLines.shift();
+    }
+    while (usLines.length > depth) {
+      usLines.shift();
+    }
+    return {
+      ds: dsLines.length > 0 ? dsLines[0] : dsBuf,
+      us: usLines.length > 0 ? usLines[0] : usBuf,
+    };
+  }
+
   /**
-   * @param {Float32Array} micFloatSamples interleaved stereo float from Web Audio
+   * @param {Float32Array} micFloatSamples mono float from Web Audio
    * @param {boolean} micEnabled
-   * @returns {{ playback: Float32Array, levels: { in: number, out: number, stress?: number }[] }}
    */
   processBuffer(micFloatSamples, micEnabled) {
     const n = this.slots.length;
     const levels = new Array(n);
 
     for (let i = 0; i < BUFFER_LEN; i++) {
-      this.gatewayDsIn[i] = micEnabled
-        ? this.floatToInt16(micFloatSamples[i])
-        : 0;
+      this.gatewayDsIn[i] = micEnabled ? this.floatToInt16(micFloatSamples[i]) : 0;
     }
 
     for (let i = 0; i < BUFFER_LEN; i++) {
@@ -109,51 +155,74 @@ export class ChainScheduler {
       return { playback: this.gatewayUsOutToFloat(), levels };
     }
 
-    // Speaker playback uses prior-period upstream energy from slot 0 (path delay).
     const playbackUs = Int16Array.from(this.prevUsOut[0]);
-
     const dsOut = Array.from({ length: n }, () => new Int16Array(BUFFER_LEN));
     const usOut = Array.from({ length: n }, () => new Int16Array(BUFFER_LEN));
 
-    // Right-to-left sweep: upstream inputs come from delayed prevUsOut, not same-period usOut.
     for (let slot = n - 1; slot >= 0; slot--) {
-      const { module, heap16, ptrs } = this.slots[slot].bindings;
-      const { upstreamInPtr, upstreamOutPtr, downstreamInPtr, downstreamOutPtr } = ptrs;
+      const slotConfig = this.slots[slot];
 
+      let dsIn;
       if (slot === 0) {
-        this.writeBuffer(heap16, downstreamInPtr, this.gatewayDsOut);
+        dsIn = this.gatewayDsOut;
       } else {
-        this.writeBuffer(heap16, downstreamInPtr, this.prevDsOut[slot - 1]);
+        dsIn = this.prevDsOut[slot - 1];
       }
 
-      const dsInBase = downstreamInPtr >> 1;
-      const inLevel = peakInt16Interleaved(heap16, dsInBase, BUFFER_LEN);
-
+      let usIn;
       if (slot === n - 1) {
-        if (this.loopbackEnabled) {
-          this.writeBuffer(heap16, upstreamInPtr, this.prevDsOut[slot]);
-        } else {
-          this.clearBuffer(heap16, upstreamInPtr);
-        }
+        usIn = this.loopbackEnabled
+          ? this.prevDsOut[slot]
+          : new Int16Array(BUFFER_LEN);
       } else {
-        this.writeBuffer(heap16, upstreamInPtr, this.prevUsOut[slot + 1]);
+        usIn = this.prevUsOut[slot + 1];
       }
 
-      module._sim_process_upstream();
-      module._sim_process_downstream();
+      const inLevel = peakInt16Mono(dsIn);
 
-      let stress = 0;
-      if (typeof module._sim_consume_merger_stress === 'function') {
-        stress = module._sim_consume_merger_stress();
+      if (this.isHardwareSlot(slotConfig)) {
+        const delayed = this.pushHardwareDelay(slot, dsIn, usIn);
+        this.hardwareAdapter.pushPeriod(delayed.ds, delayed.us);
+        const hwResult = this.hardwareAdapter.popOutputs();
+        dsOut[slot].set(hwResult.downstreamOut);
+        usOut[slot].set(hwResult.upstreamOut);
+        const meter = this.hardwareAdapter.getMeterLevels();
+        levels[slot] = {
+          in: meter.in,
+          out: meter.out,
+          stress: hwResult.underrun ? HARDWARE_STRESS_UNDERRUN : 0,
+        };
+      } else if (slotConfig.hardwareDesignated && !slotConfig.hardwareConnected) {
+        dsOut[slot].fill(0);
+        usOut[slot].fill(0);
+        levels[slot] = { in: inLevel, out: 0 };
+      } else if (slotConfig.bindings) {
+        const { module, heap16, ptrs } = slotConfig.bindings;
+        const { upstreamInPtr, upstreamOutPtr, downstreamInPtr, downstreamOutPtr } = ptrs;
+
+        this.writeBuffer(heap16, downstreamInPtr, dsIn);
+        this.writeBuffer(heap16, upstreamInPtr, usIn);
+
+        module._sim_process_upstream();
+        module._sim_process_downstream();
+
+        let stress = 0;
+        if (typeof module._sim_consume_merger_stress === 'function') {
+          stress = module._sim_consume_merger_stress();
+        }
+
+        this.copyBuffer(dsOut[slot], heap16, downstreamOutPtr);
+        this.copyBuffer(usOut[slot], heap16, upstreamOutPtr);
+        const outLevel = peakInt16Interleaved(heap16, upstreamOutPtr >> 1, BUFFER_LEN);
+        levels[slot] = { in: inLevel, out: outLevel, stress };
+      } else {
+        dsOut[slot].fill(0);
+        usOut[slot].fill(0);
+        levels[slot] = { in: inLevel, out: 0 };
       }
 
-      this.copyBuffer(dsOut[slot], heap16, downstreamOutPtr);
-      this.copyBuffer(usOut[slot], heap16, upstreamOutPtr);
       this.prevDsOut[slot].set(dsOut[slot]);
       this.prevUsOut[slot].set(usOut[slot]);
-
-      const outLevel = peakInt16Interleaved(heap16, upstreamOutPtr >> 1, BUFFER_LEN);
-      levels[slot] = { in: inLevel, out: outLevel, stress };
     }
 
     for (let i = 0; i < BUFFER_LEN; i++) {
@@ -171,4 +240,15 @@ export class ChainScheduler {
     }
     return playback;
   }
+}
+
+function peakInt16Mono(samples) {
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const abs = Math.abs(samples[i]);
+    if (abs > peak) {
+      peak = abs;
+    }
+  }
+  return peak / 32768;
 }

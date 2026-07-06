@@ -44,13 +44,10 @@ class ModuleChainProcessor extends AudioWorkletProcessor {
 
     const input = inputs[0];
     const ch0 = input && input[0];
-    const ch1 = input && (input[1] || input[0]);
 
     for (let i = 0; i < frames; i++) {
-      const left = this.micEnabled && ch0 ? ch0[i] : 0;
-      const right = this.micEnabled && ch1 ? ch1[i] : left;
-      this.accumulator[this.accumIndex++] = left;
-      this.accumulator[this.accumIndex++] = right;
+      const mono = this.micEnabled && ch0 ? ch0[i] : 0;
+      this.accumulator[this.accumIndex++] = mono;
 
       if (this.accumIndex >= this.bufferLen) {
         this.port.postMessage({

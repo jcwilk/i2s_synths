@@ -1,5 +1,4 @@
-const SAMPLE_RATE = 44100;
-const BUFFER_LEN = 512;
+import { SAMPLE_RATE, BUFFER_LEN } from '../shared/audio-constants.js';
 
 export class SimAudioEngine {
   constructor() {
@@ -65,7 +64,7 @@ export class SimAudioEngine {
 
     this.running = true;
     this.workletNode.port.postMessage({ type: 'running', running: true });
-    this.onStatus('Audio running at 44100 Hz');
+    this.onStatus(`Audio running at ${SAMPLE_RATE} Hz`);
   }
 
   async ensurePlaybackWorklet() {
@@ -94,8 +93,9 @@ export class SimAudioEngine {
               this.readIndex = 0;
             }
             if (this.current) {
-              outL[i] = this.current[this.readIndex++];
-              outR[i] = this.current[this.readIndex++];
+              const s = this.current[this.readIndex++];
+              outL[i] = s;
+              outR[i] = s;
             } else {
               outL[i] = 0;
               outR[i] = 0;
@@ -119,7 +119,7 @@ export class SimAudioEngine {
     try {
       this.micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          channelCount: 2,
+          channelCount: 1,
           sampleRate: SAMPLE_RATE,
           echoCancellation: false,
           noiseSuppression: false,

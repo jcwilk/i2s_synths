@@ -13,6 +13,7 @@
 typedef struct {
   bool active;
   bool loopback;
+  bool usePhysicalAdc;
   bool processing;
   bool hasQueued;
   bool pendingOverrun;
@@ -22,6 +23,8 @@ typedef struct {
   uint64_t streamStartUs;
   float primaryControl;
   float secondaryControl;
+  DualPotsState physicalPots;
+  bool hasPhysicalPots;
   int16_t downstreamIn[BUFFER_LEN];
   int16_t upstreamIn[BUFFER_LEN];
   int16_t downstreamOut[BUFFER_LEN];
@@ -35,9 +38,11 @@ inline void usbNeighborMakeInitial(UsbNeighborState& state) {
   state.lastStatus = BRIDGE_STATUS_OK;
 }
 
-inline void usbNeighborEnter(UsbNeighborState& state) {
+inline void usbNeighborEnter(UsbNeighborState& state, uint8_t enterMode = BRIDGE_ENTER_MODE_INJECTED) {
   state.active = true;
   state.loopback = false;
+  state.usePhysicalAdc = (enterMode == BRIDGE_ENTER_MODE_PWA_ADC);
+  state.hasPhysicalPots = false;
   state.processing = false;
   state.hasQueued = false;
   state.pendingOverrun = false;
@@ -46,7 +51,16 @@ inline void usbNeighborEnter(UsbNeighborState& state) {
   i2sNeighborSuspend();
   moduleSetup();
   state.lastStatus = BRIDGE_STATUS_OK;
-  bridgeLog("usb neighbor: enter");
+  bridgeLog(state.usePhysicalAdc ? "usb neighbor: enter (pwa adc)" : "usb neighbor: enter (injected)");
+}
+
+inline void usbNeighborSetPhysicalPots(UsbNeighborState& state, const DualPotsState& pots) {
+  state.physicalPots = pots;
+  state.hasPhysicalPots = true;
+}
+
+inline bool usbNeighborUsesPhysicalAdc(const UsbNeighborState& state) {
+  return state.active && state.usePhysicalAdc;
 }
 
 inline void usbNeighborExit(UsbNeighborState& state) {
@@ -124,7 +138,12 @@ inline void usbNeighborProcessExchange(UsbNeighborState& state) {
     return;
   }
 
-  const DualPotsState pots = offlineInjectedPots(state.primaryControl, state.secondaryControl);
+  DualPotsState pots;
+  if (state.usePhysicalAdc && state.hasPhysicalPots) {
+    pots = state.physicalPots;
+  } else {
+    pots = offlineInjectedPots(state.primaryControl, state.secondaryControl);
+  }
   moduleLoopUpstream(state.upstreamIn, state.upstreamOut, BUFFER_LEN, pots);
   moduleLoopDownstream(state.downstreamIn, state.downstreamOut, BUFFER_LEN, pots);
   state.lastStatus = BRIDGE_STATUS_OK;

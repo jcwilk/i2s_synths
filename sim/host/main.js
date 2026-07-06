@@ -5,6 +5,7 @@ import {
   MERGER_STRESS_UNDERRUN,
   MERGER_STRESS_OVERRUN,
   MERGER_STRESS_REV_OVERRUN,
+  HARDWARE_STRESS_UNDERRUN,
 } from './chain-scheduler.js';
 import { POT_POLL_MS, applyPotStep } from './pot-simulator.js';
 import {
@@ -13,6 +14,9 @@ import {
   LEVEL_GRAPH_CHANNELS,
   LEVEL_GRAPH_SPEEDS,
 } from './level-graph.js';
+import { BridgeClient } from './bridge-client.js';
+import { HardwareSlotAdapter } from './hardware-slot-adapter.js';
+import { SAMPLE_RATE } from '../shared/audio-constants.js';
 
 const MODULES = {
   passthrough: { label: 'Passthrough', artifact: '../wasm/out/passthrough.js' },
@@ -31,10 +35,18 @@ const ui = {
   micToggle: document.getElementById('mic-toggle'),
   startBtn: document.getElementById('start-btn'),
   status: document.getElementById('status'),
+  bridgeUrlInput: document.getElementById('bridge-url'),
 };
+
+const DEFAULT_BRIDGE_URL = 'ws://localhost:8765';
+const bridgeClient = new BridgeClient(
+  localStorage.getItem('bridgeUrl') ?? DEFAULT_BRIDGE_URL,
+);
+const hardwareAdapter = new HardwareSlotAdapter(bridgeClient);
 
 const engine = new SimAudioEngine();
 const scheduler = new ChainScheduler();
+scheduler.setHardwareAdapter(hardwareAdapter);
 engine.setChainScheduler(scheduler);
 
 engine.onStatus = (msg) => {
@@ -117,9 +129,50 @@ function potSliderTo01(slider) {
 }
 
 function syncBindingsToScheduler() {
-  scheduler.setSlots(units.map((u) => ({ bindings: u.bindings })));
+  scheduler.setSlots(units.map((u) => ({
+    bindings: u.hardwareDesignated ? null : u.bindings,
+    hardwareDesignated: u.hardwareDesignated,
+    hardwareConnected: u.hardwareConnected,
+  })));
   const rightmost = units[units.length - 1];
   scheduler.setLoopbackEnabled(rightmost?.loopbackEnabled ?? false);
+}
+
+function hardwareDesignatedUnit() {
+  return units.find((u) => u.hardwareDesignated) ?? null;
+}
+
+function updateHardwareToggleStates() {
+  const designated = hardwareDesignatedUnit();
+  for (const unit of units) {
+    const canDesignate = !designated || designated === unit;
+    unit.hardwareToggle.disabled = !canDesignate && !unit.hardwareDesignated;
+  }
+}
+
+function refreshBridgeStatusChips() {
+  for (const unit of units) {
+    unit.updateHardwareStatus();
+  }
+}
+
+bridgeClient.onStatus = () => {
+  refreshBridgeStatusChips();
+};
+
+bridgeClient.onError = (message) => {
+  ui.status.textContent = `Bridge: ${message}`;
+};
+
+if (ui.bridgeUrlInput) {
+  ui.bridgeUrlInput.value = bridgeClient.url;
+  ui.bridgeUrlInput.addEventListener('change', () => {
+    const url = ui.bridgeUrlInput.value.trim() || DEFAULT_BRIDGE_URL;
+    bridgeClient.url = url;
+    localStorage.setItem('bridgeUrl', url);
+    bridgeClient.disconnect();
+    refreshBridgeStatusChips();
+  });
 }
 
 function updateUnitCountHint() {
@@ -204,7 +257,7 @@ async function rebuildAudioIfRunning() {
       unit.levelSampler.start();
     }
     ui.startBtn.textContent = 'Stop audio';
-    ui.status.textContent = 'Audio running at 44100 Hz';
+    ui.status.textContent = `Audio running at ${SAMPLE_RATE} Hz`;
   } catch (err) {
     ui.startBtn.textContent = 'Start audio';
     ui.status.textContent =
@@ -221,6 +274,8 @@ class ProcessingUnit {
     this.moduleKey = moduleKey;
     this.bindings = null;
     this.loopbackEnabled = false;
+    this.hardwareDesignated = false;
+    this.hardwareConnected = false;
     this.potTargets = { primary: 0.5, secondary: 0 };
     this.levelGraphs = [];
     this.levelSampler = null;
@@ -238,6 +293,19 @@ class ProcessingUnit {
       <div class="card-controls">
         <label>Module type</label>
         <select class="module-select"></select>
+        <div class="hardware-row row">
+          <input class="hardware-toggle" type="checkbox" id="hw-u${index}" />
+          <label class="hardware-label" for="hw-u${index}" style="margin:0;">Hardware slot</label>
+        </div>
+        <div class="hardware-controls" hidden>
+          <div class="hw-status-chips row" aria-live="polite"></div>
+          <div class="row" style="margin-top:0.35rem; gap:0.35rem;">
+            <button type="button" class="hw-connect-btn">Connect</button>
+            <button type="button" class="hw-disconnect-btn" hidden>Disconnect</button>
+          </div>
+          <p class="hw-pot-hint hint" hidden>Device pots — physical controls on module</p>
+        </div>
+        <div class="wasm-pots">
         <label>Primary pot</label>
         <div class="row">
           <input class="primary-pot" type="range" min="0" max="100" value="50" />
@@ -247,6 +315,7 @@ class ProcessingUnit {
         <div class="row">
           <input class="secondary-pot" type="range" min="0" max="100" value="0" />
           <span class="secondary-value">0%</span>
+        </div>
         </div>
         <div class="loopback-slot">
           <div class="loopback-row row">
@@ -264,6 +333,14 @@ class ProcessingUnit {
     this.dragHandle = this.card.querySelector('.drag-handle');
     this.deleteBtn = this.card.querySelector('.delete-btn');
     this.moduleSelect = this.card.querySelector('.module-select');
+    this.hardwareToggle = this.card.querySelector('.hardware-toggle');
+    this.hardwareLabel = this.card.querySelector('.hardware-label');
+    this.hardwareControls = this.card.querySelector('.hardware-controls');
+    this.hardwareStatusChips = this.card.querySelector('.hw-status-chips');
+    this.hwConnectBtn = this.card.querySelector('.hw-connect-btn');
+    this.hwDisconnectBtn = this.card.querySelector('.hw-disconnect-btn');
+    this.hwPotHint = this.card.querySelector('.hw-pot-hint');
+    this.wasmPots = this.card.querySelector('.wasm-pots');
     this.primaryPot = this.card.querySelector('.primary-pot');
     this.secondaryPot = this.card.querySelector('.secondary-pot');
     this.primaryValue = this.card.querySelector('.primary-value');
@@ -305,8 +382,30 @@ class ProcessingUnit {
     }
 
     this.moduleSelect.addEventListener('change', () => {
+      if (this.hardwareConnected) {
+        this.moduleSelect.value = this.moduleKey;
+        return;
+      }
       this.changeModuleType(this.moduleSelect.value).catch((err) => {
         ui.status.textContent = `Module load failed: ${err.message}`;
+      });
+    });
+
+    this.hardwareToggle.addEventListener('change', () => {
+      this.setHardwareDesignated(this.hardwareToggle.checked).catch((err) => {
+        ui.status.textContent = `Hardware designation failed: ${err.message}`;
+      });
+    });
+
+    this.hwConnectBtn.addEventListener('click', () => {
+      this.connectHardware().catch((err) => {
+        ui.status.textContent = `Hardware connect failed: ${err.message}`;
+      });
+    });
+
+    this.hwDisconnectBtn.addEventListener('click', () => {
+      this.disconnectHardware().catch((err) => {
+        ui.status.textContent = `Hardware disconnect failed: ${err.message}`;
       });
     });
 
@@ -380,7 +479,7 @@ class ProcessingUnit {
     const { module, moduleKey } = this.bindings;
     if (moduleKey === 'delay' && module._sim_get_delay_buffer_frames) {
       const frames = module._sim_get_delay_buffer_frames();
-      const ms = ((frames * 1000) / 44100).toFixed(1);
+      const ms = ((frames * 1000) / SAMPLE_RATE).toFixed(1);
       this.moduleInfo.textContent = `Delay ring: ${frames} frames (${ms} ms)`;
       this.moduleInfo.hidden = false;
     } else {
@@ -392,7 +491,8 @@ class ProcessingUnit {
     if (!this.stressBadge || !stressFlags) {
       return;
     }
-    const isUnderrun = (stressFlags & MERGER_STRESS_UNDERRUN) !== 0;
+    const isHwUnderrun = (stressFlags & HARDWARE_STRESS_UNDERRUN) !== 0;
+    const isUnderrun = (stressFlags & MERGER_STRESS_UNDERRUN) !== 0 || isHwUnderrun;
     const isOverrun =
       (stressFlags & MERGER_STRESS_OVERRUN) !== 0 ||
       (stressFlags & MERGER_STRESS_REV_OVERRUN) !== 0;
@@ -413,11 +513,108 @@ class ProcessingUnit {
   }
 
   async loadModule(moduleKey) {
+    if (this.hardwareDesignated) {
+      this.moduleKey = moduleKey;
+      syncBindingsToScheduler();
+      return;
+    }
     this.moduleKey = moduleKey;
     this.bindings = await createWasmBindings(moduleKey);
     this.resetPotSmoothedToSliders();
     this.updateModuleInfo();
     syncBindingsToScheduler();
+  }
+
+  updateHardwareStatus() {
+    if (!this.hardwareDesignated) {
+      return;
+    }
+    const s = bridgeClient.statusSnapshot();
+    const chips = [];
+    if (!s.bridgeReachable) {
+      chips.push('<span class="hw-chip hw-offline">Bridge offline</span>');
+    } else if (!s.deviceAttached) {
+      chips.push('<span class="hw-chip">Bridge online</span>');
+      chips.push('<span class="hw-chip hw-warn">No device</span>');
+    } else {
+      chips.push('<span class="hw-chip">Device attached</span>');
+    }
+    if (this.hardwareConnected && s.sessionActive) {
+      chips.push('<span class="hw-chip hw-active">Session active</span>');
+    }
+    if (s.firmwareModuleKind && this.moduleKey !== s.firmwareModuleKind) {
+      chips.push('<span class="hw-chip hw-mismatch">Module mismatch</span>');
+    }
+    this.hardwareStatusChips.innerHTML = chips.join('');
+  }
+
+  refreshHardwareUi() {
+    const designated = this.hardwareDesignated;
+    this.hardwareControls.hidden = !designated;
+    this.card.classList.toggle('is-hardware', designated);
+    const connected = this.hardwareConnected;
+    this.wasmPots.hidden = designated && connected;
+    this.hwPotHint.hidden = !(designated && connected);
+    this.primaryPot.disabled = designated && connected;
+    this.secondaryPot.disabled = designated && connected;
+    this.moduleSelect.disabled = connected;
+    this.hwConnectBtn.hidden = connected;
+    this.hwDisconnectBtn.hidden = !connected;
+    this.updateHardwareStatus();
+  }
+
+  async setHardwareDesignated(enabled) {
+    if (enabled && hardwareDesignatedUnit() && hardwareDesignatedUnit() !== this) {
+      this.hardwareToggle.checked = false;
+      return;
+    }
+    if (this.hardwareConnected) {
+      await this.disconnectHardware();
+    }
+    this.hardwareDesignated = enabled;
+    this.hardwareToggle.checked = enabled;
+    if (enabled) {
+      this.bindings = null;
+    } else if (!this.bindings) {
+      await this.loadModule(this.moduleKey);
+    }
+    updateHardwareToggleStates();
+    this.refreshHardwareUi();
+    syncBindingsToScheduler();
+    await rebuildAudioIfRunning();
+  }
+
+  async connectHardware() {
+    if (!this.hardwareDesignated || this.hardwareConnected) {
+      return;
+    }
+    await bridgeClient.connect();
+    const status = await bridgeClient.startSession('pwa');
+    if (status.firmwareModuleKind && status.firmwareModuleKind !== this.moduleKey) {
+      await bridgeClient.stopSession();
+      this.updateHardwareStatus();
+      ui.status.textContent =
+        `Module mismatch: slot is ${this.moduleKey}, device is ${status.firmwareModuleKind}`;
+      return;
+    }
+    this.hardwareConnected = true;
+    hardwareAdapter.start();
+    this.refreshHardwareUi();
+    syncBindingsToScheduler();
+    await rebuildAudioIfRunning();
+    ui.status.textContent = `Hardware connected (${status.firmwareModuleKind ?? this.moduleKey})`;
+  }
+
+  async disconnectHardware() {
+    if (!this.hardwareConnected) {
+      return;
+    }
+    hardwareAdapter.stop();
+    await bridgeClient.stopSession();
+    this.hardwareConnected = false;
+    this.refreshHardwareUi();
+    syncBindingsToScheduler();
+    await rebuildAudioIfRunning();
   }
 
   async changeModuleType(moduleKey) {
@@ -456,6 +653,9 @@ function setupUnitDragDrop(unit) {
   unit.card.draggable = false;
 
   unit.dragHandle.addEventListener('pointerdown', () => {
+    if (unit.hardwareConnected) {
+      return;
+    }
     unit.card.draggable = true;
   });
   unit.dragHandle.addEventListener('pointerup', () => {
@@ -500,6 +700,10 @@ function setupUnitDragDrop(unit) {
   unit.card.addEventListener('drop', (event) => {
     event.preventDefault();
     unit.card.classList.remove('is-drop-target');
+    if (units.some((u) => u.hardwareConnected)) {
+      ui.status.textContent = 'Disconnect hardware before reordering';
+      return;
+    }
     if (!draggedUnit || draggedUnit === unit) {
       return;
     }

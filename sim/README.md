@@ -63,13 +63,22 @@ node sim/verify-wasm.mjs
 
 ## Run locally
 
-Serve the `sim/` directory (any static server works):
+Serve the `sim/` directory (bridge uses port **8765** by default):
 
 ```bash
-npx serve sim -p 8765
+npx serve sim -p 8080
 ```
 
-Open [http://localhost:8765/host/](http://localhost:8765/host/).
+Open [http://localhost:8080/host/](http://localhost:8080/host/).
+
+Start the hardware bridge (separate terminal):
+
+```bash
+npm start --prefix sim/hardware-bridge
+# or: FIRMWARE_PORT=/dev/ttyACM0 npm start --prefix sim/hardware-bridge
+```
+
+Default bridge WebSocket URL in the gateway card: `ws://localhost:8765`. See [`hardware-bridge/README.md`](hardware-bridge/README.md) for troubleshooting.
 
 1. **Gateway** (left card): toggle microphone, start/stop audio.
 2. **Processing units**: module type dropdown (all five kinds), primary/secondary pot sliders, In/Out level graphs. Each card header has a **drag handle** (⠿) for reorder and a **delete** button (×).
@@ -77,23 +86,24 @@ Open [http://localhost:8765/host/](http://localhost:8765/host/).
 4. **Delete unit**: remove a card via × in the header. Disabled on the sole remaining unit while audio is running; when stopped, you may delete down to zero units.
 5. **Reorder units**: drag a unit card by its handle to a new position among other unit cards. The gateway card stays fixed. Sliders and selectors do not initiate reorder.
 6. **Loopback** (rightmost unit only): when enabled, that unit's upstream input receives its prior downstream output; default off.
+7. **Hardware slot** (Phase 2): mark one unit as hardware, match module type to flashed firmware, start bridge, Connect. Physical device pots apply when connected; WASM sliders hidden.
 
 Initial load includes gateway plus one delay unit.
 
 ## Structural reconfiguration and audio rebuild
 
-These operator actions are **structural reconfiguration**: add unit, delete unit, reorder units, change module type, toggle loopback on the rightmost unit. When audio is **running**, each structural edit briefly stops output, clears level histories and playback buffers, re-syncs the chain scheduler (including path delay state), and **auto-restarts** audio while preserving the microphone toggle and pot slider positions. The status line shows “Restarting audio…” during rebuild; failures surface there with a prompt to tap Start again.
+These operator actions are **structural reconfiguration**: add unit, delete unit, reorder units, change module type, toggle loopback on the rightmost unit, **designate/clear hardware mode**, **connect/disconnect hardware session**. When audio is **running**, each structural edit briefly stops output, clears level histories and playback buffers, re-syncs the chain scheduler (including path delay state), and **auto-restarts** audio while preserving the microphone toggle and pot slider positions. The status line shows “Restarting audio…” during rebuild; failures surface there with a prompt to tap Start again.
 
-**Pot slider** moves are **not** structural — they continue to apply live during playback without restarting audio.
+**Pot slider** moves on WASM units are **not** structural. **Physical pot** movement on a connected hardware device is **not** structural. Disconnect hardware before reordering units.
 
 When audio is **stopped**, structural edits update layout and configuration only; audio does not start automatically.
 
 ## Chain wiring
 
-- **Sample rate:** 44100 Hz (`SAMPLE_RATE` in firmware `constants.h`).
-- **Buffer size:** 512 interleaved stereo int16 samples per path call (`BUFFER_LEN`).
+- **Sample rate:** 22050 Hz mono (`SAMPLE_RATE` in firmware `constants.h`).
+- **Buffer size:** 128 mono int16 samples per path call (`BUFFER_LEN`, ~5.8 ms period).
 - **Gateway (index 0):** I/O shim only — no WASM, transparent passthrough on both paths.
-- **Processing units (slots 1..N):** one WASM instance per slot; upstream then downstream per unit per buffer, right-to-left sweep order.
+- **Processing units (slots 1..N):** one WASM instance per slot (or hardware bridge slot when designated and connected); upstream then downstream per unit per buffer, right-to-left sweep order.
 
 | Signal | Source |
 |--------|--------|
@@ -114,23 +124,45 @@ Each unit's dropdown offers: passthrough, delay, merger, cutoff, debug tone. Cha
 Pot sliders represent the simulated **raw** ADC reading in `[0, 1]`. Smoothed state written to each slot's WASM `DualPotsState` uses the same time-scaled exponential moving average as firmware `potsUpdate` in `src/input/pots.h`:
 
 - `EMA_ALPHA = 0.008` per millisecond
-- Poll interval ≈ one I2S buffer period at 44.1 kHz (`512 / 44100` ≈ 11.6 ms)
+- Poll interval ≈ one I2S buffer period at 22.05 kHz (`128 / 22050` ≈ 5.8 ms)
 
 Each unit card owns an independent pot poll loop writing that slot's WASM struct.
 
 ## Level metering
 
-Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s / 64 s) for downstream **In** (blue) and upstream **Out** (orange). One peak sample per path per firmware buffer period (~86 Hz).
+Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s / 64 s) for downstream **In** (blue) and upstream **Out** (orange). One peak sample per path per firmware buffer period (~172 Hz at 22.05 kHz / 128).
+
+## Hardware slot (Phase 2)
+
+| Topic | Behavior |
+|-------|----------|
+| **Limit** | At most **one** hardware-designated unit per chain |
+| **Bridge** | Local Node process relays WebSocket ↔ USB (`sim/hardware-bridge/`) |
+| **Module parity** | Slot module type must match flashed firmware before Connect |
+| **Controls** | Physical pots on device when connected; WASM sliders hidden |
+| **Async pipeline** | Ring buffers (~2 periods) decouple AudioWorklet from USB RTT |
+| **Extra latency** | USB round-trip + bridge relay + ring depth vs all-WASM chains |
+
+### Mixed-chain audition guidance
+
+Compare hardware vs all-WASM chains with the **same module type** on the hardware slot:
+
+1. Build an all-WASM reference: e.g. gateway → passthrough → delay → passthrough (loopback on rightmost if needed).
+2. Swap the delay unit to **hardware slot**, flash matching firmware, connect bridge.
+3. Expect **additional end-to-end latency** on paths through the hardware slot (typically tens of ms from USB RTT plus ~12 ms ring depth at 22.05 kHz / 128).
+4. Merger or timing-sensitive audition through hardware may sound different from all-WASM — use passthrough neighbors for A/B of device DSP only.
 
 ## Limitations
 
 | Area | Current behavior | Future phase |
 |------|------------------|--------------|
-| Startup mute | Not modeled (~1 s silence on device boot) | Phase 2 |
-| Render quantum | Web Audio 128-frame render quantum vs 512-sample firmware buffer (no internal ring) | Phase 2 |
+| Startup mute | Not modeled (~1 s silence on device boot) | — |
+| Render quantum | Web Audio 128-frame quantum vs 128-sample firmware buffer | Phase 3 hardening |
+| Hardware slots | Single slot only | Phase 4+ |
+| USB latency | Visible extra delay vs all-WASM; underrun badge on starvation | Phase 3 hardening |
 | Undo/redo | Delete and reorder are immediate | Future UX |
 | Tooling | Shell build + manual serve | Phase 3 npm/CI |
-| Gateway module | I/O shim only | Optional Phase 2 |
+| Gateway module | I/O shim only | Optional |
 
 Merger cross-path timing uses decoupled per-path delay state in the chain host (Phase 2 parity). Merger unit cards show brief **Underrun** / **Overrun** badges when the compiled module triggers those recovery paths.
 
@@ -147,6 +179,7 @@ Merger cross-path timing uses decoupled per-path delay state in the chain host (
 | **Reorder units** | Add passthrough then debug tone, start audio, drag debug tone left of passthrough via handle — audible order follows new layout after rebuild. |
 | **Pot live during playback** | Start audio, move primary pot — output changes without stop/rebuild. |
 | **Touch reorder QA** | On iOS Safari and Android Chrome: drag handle reorders units without scrolling the page; sliders and module selector do not reorder. |
+| **Hardware delay slot** | Bridge running, delay firmware flashed: passthrough → HW delay (connected) → passthrough, mic on, loopback optional — delay audible; twist device pots; WASM neighbors still process; no sustained Underrun badge. |
 
 ## Automated acceptance
 
@@ -163,5 +196,6 @@ Merger cross-path timing uses decoupled per-path delay state in the chain host (
 | Chain length cap | `MAX_PROCESSING_UNITS = 8`; Add unit disabled at cap |
 | Slot order swap | `verify-wasm.mjs`: scheduler slot reorder changes first-hop impulse routing |
 | Delete/reorder DOM | Manual browser check (see acceptance matrix); handle uses `touch-action: none` |
+| Bridge relay smoke | `hardware-bridge/integration-smoke.mjs`: 30 s sustained duplex, delay firmware |
 
-**Manual browser check:** Run the acceptance matrix above on [http://localhost:8765/host/](http://localhost:8765/host/) with `./sim/build-wasm.sh` completed first.
+**Manual browser check:** Run the acceptance matrix above on [http://localhost:8080/host/](http://localhost:8080/host/) with `./sim/build-wasm.sh` completed and bridge running.

@@ -14,7 +14,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, 'wasm', 'out');
-const SAMPLE_RATE = 44100;
+const SAMPLE_RATE = 22050;
 
 const VARIANTS = ['passthrough', 'delay', 'merger', 'debug_tone', 'cutoff'];
 

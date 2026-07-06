@@ -203,6 +203,22 @@
       color: #ff8a8a;
       border: 1px solid #8a2020;
     }
+    .hw-chip {
+      display: inline-block;
+      padding: 0.12rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      background: #252a38;
+      border: 1px solid #3a4050;
+      color: #aab;
+    }
+    .hw-chip.hw-active { border-color: #3a7a50; color: #8fd6a8; }
+    .hw-chip.hw-offline { border-color: #5a3030; color: #c88; }
+    .hw-chip.hw-warn { border-color: #8a7800; color: #ffd866; }
+    .hw-chip.hw-mismatch { border-color: #8a3030; color: #ffaaaa; }
+    .bridge-settings { margin-top: 0.75rem; }
+    .unit-card.is-hardware { border-color: #4a6080; }
+    .wasm-pots[disabled-section] { opacity: 0.5; }
   </style>
 </head>
 <body>
@@ -217,6 +233,10 @@
         <label for="mic-toggle" style="margin: 0;">Microphone input</label>
       </div>
       <button id="start-btn" type="button" style="margin-top: 0.75rem; width: 100%;">Start audio</button>
+      <div class="bridge-settings">
+        <label for="bridge-url">Bridge URL</label>
+        <input id="bridge-url" type="text" value="ws://localhost:8765" style="width:100%;" />
+      </div>
       <div class="gateway-fill" aria-hidden="true"></div>
     </div>
     <div id="units-container"></div>

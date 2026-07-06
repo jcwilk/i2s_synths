@@ -187,10 +187,17 @@ inline void bridgeHandleUsbWirePayload(const uint8_t* payload, size_t payloadLen
   }
 
   switch (command) {
-    case BRIDGE_CMD_ENTER_USB:
-      usbNeighborEnter(g_usb_neighbor_state);
+    case BRIDGE_CMD_ENTER_USB: {
+      uint8_t enterMode = BRIDGE_ENTER_MODE_INJECTED;
+      if (payloadLen > BRIDGE_HEADER_SIZE) {
+        enterMode = payload[5];
+      } else if (payloadLen == BRIDGE_HEADER_SIZE) {
+        enterMode = payload[5];
+      }
+      usbNeighborEnter(g_usb_neighbor_state, enterMode);
       bridgeWriteUsbAck(BRIDGE_CMD_ENTER_USB, 0, g_usb_neighbor_state.lastStatus);
       break;
+    }
 
     case BRIDGE_CMD_EXIT_USB:
       usbNeighborExit(g_usb_neighbor_state);
@@ -236,6 +243,10 @@ inline void bridgeHandleUsbWirePayload(const uint8_t* payload, size_t payloadLen
       break;
     }
 
+    case BRIDGE_CMD_QUERY_MODULE:
+      bridgeWriteUsbAck(BRIDGE_CMD_QUERY_MODULE, (uint32_t)ACTIVE_MODULE, BRIDGE_STATUS_OK);
+      break;
+
     default:
       bridgeWriteUsbAck(command, 0, BRIDGE_STATUS_ERR_BAD_CMD);
       break;
@@ -269,6 +280,14 @@ inline void bridgeTransportPoll() {
     return;
   }
   bridgePollUsbRealtime();
+}
+
+inline bool bridgeUsbNeighborUsesPhysicalAdc() {
+  return usbNeighborUsesPhysicalAdc(g_usb_neighbor_state);
+}
+
+inline void bridgeUsbNeighborSetPhysicalPots(const DualPotsState& pots) {
+  usbNeighborSetPhysicalPots(g_usb_neighbor_state, pots);
 }
 
 inline bool bridgeUsbNeighborIsActive() {

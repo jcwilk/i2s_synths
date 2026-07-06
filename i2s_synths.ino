@@ -70,6 +70,25 @@ void setup() {
 }
 
 void loop() {
+  if (bridgeUsbNeighborIsActive()) {
+    unsigned long nowMs = millis();
+    if (baseLoopMs == 0) {
+      baseLoopMs = nowMs;
+    }
+    unsigned long normalizedNow = nowMs - baseLoopMs;
+    unsigned long deltaMs = 0;
+    if (normalizedNow > accumulatedDeltaMs) {
+      deltaMs = normalizedNow - accumulatedDeltaMs;
+      accumulatedDeltaMs += deltaMs;
+    }
+    if (bridgeUsbNeighborUsesPhysicalAdc() && deltaMs > 0) {
+      sketch_pots_state = potsUpdate(sketch_pots_state, deltaMs);
+      bridgeUsbNeighborSetPhysicalPots(sketch_pots_state);
+    }
+    bridgeTransportServiceActive();
+    return;
+  }
+
   bridgeTransportServiceActive();
   if (bridgeTransportIsActive()) {
     return;
