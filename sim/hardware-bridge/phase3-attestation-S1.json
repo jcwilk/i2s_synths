@@ -1,0 +1,21 @@
+{
+  "id": "S1",
+  "platform": "Linux 6.8.0-124-generic (x64)",
+  "bridgeUrl": "ws://localhost:8766",
+  "chainLayout": "GW + 7 WASM + HW end (passthrough)",
+  "expectedModuleKind": "passthrough",
+  "firmwareModuleKind": "passthrough",
+  "mic": true,
+  "durationS": 600.01,
+  "targetDurationS": 600,
+  "exchanges": 72377,
+  "dropCount": 21,
+  "transientErrorRate": 0.0002901474225237299,
+  "statusErrors": 21,
+  "seqGaps": 0,
+  "sustainedUnderrunWindows": 0,
+  "latencyNotes": "Bridge pipelined relay @ 5.80 ms period; PWA mixed-chain adds ring+inter-unit delays per published budget",
+  "pass": true,
+  "pwaNote": "Confirm full topology in host UI; this harness validates sustained bridge+USB duplex for the scenario module kind."
+}
+OVERALL: PASS

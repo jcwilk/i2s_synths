@@ -43,7 +43,7 @@ prepare_sketch_staging() {
   # Per-module defines go in build_opt.h so we do not override build.extra_flags
   # (which would strip ARDUINO_USB_* and route Serial to UART0 instead of USB CDC).
   if [[ -n "$module_define" ]]; then
-    printf '%s\n' "-DACTIVE_MODULE=${module_define}" > "${STAGING_DIR}/build_opt.h"
+    printf '%s\n' "-DACTIVE_MODULE=${module_define}" "-DBRIDGE_USE_SERIAL_FOR_AUDIO=1" > "${STAGING_DIR}/build_opt.h"
   fi
 }
 

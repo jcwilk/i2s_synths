@@ -84,6 +84,12 @@ inline void bridgeWriteUsbExchangeResponse(uint8_t command, const BridgeExchange
   memcpy(frame + offset, &response.status, sizeof(response.status));
   offset += sizeof(response.status);
   memcpy(frame + offset, &response.timestampUs, sizeof(response.timestampUs));
+  offset += sizeof(response.timestampUs);
+  memcpy(frame + offset, &response.primaryTelemetry, sizeof(response.primaryTelemetry));
+  offset += sizeof(response.primaryTelemetry);
+  memcpy(frame + offset, &response.secondaryTelemetry, sizeof(response.secondaryTelemetry));
+  offset += sizeof(response.secondaryTelemetry);
+  memcpy(frame + offset, &response.processingUs, sizeof(response.processingUs));
   bridgeWriteLengthPrefixed(bridgeAudioStream(), frame, sizeof(frame));
 }
 
@@ -268,7 +274,9 @@ inline void bridgePollUsbRealtime() {
 }
 
 inline void bridgeTransportPoll() {
+#if !BRIDGE_USE_SERIAL_FOR_AUDIO
   bridgePollOfflineSerial();
+#endif
   if (g_usb_neighbor_state.active) {
     for (int pass = 0; pass < 64; ++pass) {
       const int avail = bridgeAudioStream().available();
@@ -297,7 +305,10 @@ inline bool bridgeUsbNeighborIsActive() {
 inline void bridgeTransportRunUsbRealtimeLoop() {
   while (g_usb_neighbor_state.active) {
     bridgePollUsbRealtime();
+#if !BRIDGE_USE_SERIAL_FOR_AUDIO
     bridgePollOfflineSerial();
+#endif
+    delay(1);
   }
 }
 

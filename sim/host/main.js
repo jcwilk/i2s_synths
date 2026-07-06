@@ -6,6 +6,8 @@ import {
   MERGER_STRESS_OVERRUN,
   MERGER_STRESS_REV_OVERRUN,
   HARDWARE_STRESS_UNDERRUN,
+  HARDWARE_STRESS_OVERRUN,
+  HARDWARE_STRESS_SUSTAINED,
 } from './chain-scheduler.js';
 import { POT_POLL_MS, applyPotStep } from './pot-simulator.js';
 import {
@@ -16,7 +18,7 @@ import {
 } from './level-graph.js';
 import { BridgeClient } from './bridge-client.js';
 import { HardwareSlotAdapter } from './hardware-slot-adapter.js';
-import { SAMPLE_RATE } from '../shared/audio-constants.js';
+import { SAMPLE_RATE, BUFFER_RATE_HZ } from '../shared/audio-constants.js';
 
 const MODULES = {
   passthrough: { label: 'Passthrough', artifact: '../wasm/out/passthrough.js' },
@@ -155,6 +157,14 @@ function refreshBridgeStatusChips() {
     unit.updateHardwareStatus();
   }
 }
+
+hardwareAdapter.onFatal = (message) => {
+  ui.status.textContent = `Hardware session ended: ${message}`;
+  const hwUnit = hardwareDesignatedUnit();
+  if (hwUnit?.hardwareConnected) {
+    hwUnit.disconnectHardware().catch(() => {});
+  }
+};
 
 bridgeClient.onStatus = () => {
   refreshBridgeStatusChips();
@@ -299,6 +309,10 @@ class ProcessingUnit {
         </div>
         <div class="hardware-controls" hidden>
           <div class="hw-status-chips row" aria-live="polite"></div>
+          <div class="hw-telemetry row" hidden aria-live="polite">
+            <span class="hw-telemetry-primary hint">Pot A: —</span>
+            <span class="hw-telemetry-secondary hint">Pot B: —</span>
+          </div>
           <div class="row" style="margin-top:0.35rem; gap:0.35rem;">
             <button type="button" class="hw-connect-btn">Connect</button>
             <button type="button" class="hw-disconnect-btn" hidden>Disconnect</button>
@@ -337,6 +351,9 @@ class ProcessingUnit {
     this.hardwareLabel = this.card.querySelector('.hardware-label');
     this.hardwareControls = this.card.querySelector('.hardware-controls');
     this.hardwareStatusChips = this.card.querySelector('.hw-status-chips');
+    this.hwTelemetryRow = this.card.querySelector('.hw-telemetry');
+    this.hwTelemetryPrimary = this.card.querySelector('.hw-telemetry-primary');
+    this.hwTelemetrySecondary = this.card.querySelector('.hw-telemetry-secondary');
     this.hwConnectBtn = this.card.querySelector('.hw-connect-btn');
     this.hwDisconnectBtn = this.card.querySelector('.hw-disconnect-btn');
     this.hwPotHint = this.card.querySelector('.hw-pot-hint');
@@ -366,6 +383,7 @@ class ProcessingUnit {
           durationSec: speed.durationSec,
           title: speed.title,
           channels: LEVEL_GRAPH_CHANNELS,
+          sampleRateHz: BUFFER_RATE_HZ,
         }),
       );
     }
@@ -491,25 +509,54 @@ class ProcessingUnit {
     if (!this.stressBadge || !stressFlags) {
       return;
     }
+    const isSustained = (stressFlags & HARDWARE_STRESS_SUSTAINED) !== 0;
     const isHwUnderrun = (stressFlags & HARDWARE_STRESS_UNDERRUN) !== 0;
+    const isHwOverrun = (stressFlags & HARDWARE_STRESS_OVERRUN) !== 0;
     const isUnderrun = (stressFlags & MERGER_STRESS_UNDERRUN) !== 0 || isHwUnderrun;
     const isOverrun =
       (stressFlags & MERGER_STRESS_OVERRUN) !== 0 ||
-      (stressFlags & MERGER_STRESS_REV_OVERRUN) !== 0;
-    if (!isUnderrun && !isOverrun) {
+      (stressFlags & MERGER_STRESS_REV_OVERRUN) !== 0 ||
+      isHwOverrun;
+    if (!isUnderrun && !isOverrun && !isSustained) {
       return;
     }
-    const kind = isOverrun ? 'overrun' : 'underrun';
+    let kind = 'underrun';
+    let label = 'Underrun';
+    if (isSustained) {
+      kind = 'sustained';
+      label = 'Sustained drop risk';
+    } else if (isOverrun) {
+      kind = 'overrun';
+      label = 'Overrun';
+    }
     this.stressBadge.hidden = false;
     this.stressBadge.dataset.stress = kind;
-    this.stressBadge.textContent = kind === 'overrun' ? 'Overrun' : 'Underrun';
-    if (this.stressTimer !== null) {
+    this.stressBadge.textContent = label;
+    if (this.stressTimer !== null && !isSustained) {
       clearTimeout(this.stressTimer);
+      this.stressTimer = setTimeout(() => {
+        this.stressBadge.hidden = true;
+        this.stressTimer = null;
+      }, 800);
+    } else if (isSustained) {
+      if (this.stressTimer !== null) {
+        clearTimeout(this.stressTimer);
+        this.stressTimer = null;
+      }
     }
-    this.stressTimer = setTimeout(() => {
-      this.stressBadge.hidden = true;
-      this.stressTimer = null;
-    }, 800);
+  }
+
+  updateHardwareTelemetry(levels) {
+    if (!this.hardwareConnected || !levels?.telemetry) {
+      return;
+    }
+    const { primary, secondary } = levels.telemetry;
+    if (this.hwTelemetryPrimary) {
+      this.hwTelemetryPrimary.textContent = `Pot A: ${(primary * 100).toFixed(0)}%`;
+    }
+    if (this.hwTelemetrySecondary) {
+      this.hwTelemetrySecondary.textContent = `Pot B: ${(secondary * 100).toFixed(0)}%`;
+    }
   }
 
   async loadModule(moduleKey) {
@@ -555,6 +602,9 @@ class ProcessingUnit {
     const connected = this.hardwareConnected;
     this.wasmPots.hidden = designated && connected;
     this.hwPotHint.hidden = !(designated && connected);
+    if (this.hwTelemetryRow) {
+      this.hwTelemetryRow.hidden = !(designated && connected);
+    }
     this.primaryPot.disabled = designated && connected;
     this.secondaryPot.disabled = designated && connected;
     this.moduleSelect.disabled = connected;
@@ -849,7 +899,10 @@ async function addUnit(moduleKey = 'delay') {
 engine.onLevels = (levels) => {
   for (let i = 0; i < units.length; i++) {
     if (levels[i]) {
-      units[i].levelSampler?.feed(levels[i]);
+      units[i].levelSampler?.feed({ in: levels[i].in, out: levels[i].out });
+      if (units[i].hardwareConnected) {
+        units[i].updateHardwareTelemetry(levels[i]);
+      }
       if (levels[i].stress) {
         units[i].showMergerStress(levels[i].stress);
       }

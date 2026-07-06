@@ -122,6 +122,7 @@ export async function openAudioPort(portPath, baudRate = 115200) {
     port.open((error) => (error ? reject(error) : resolve()));
   });
   attachBridgeReader(port);
+  await new Promise((r) => setTimeout(r, 2500));
   await drainIncoming(port, 500);
   return port;
 }

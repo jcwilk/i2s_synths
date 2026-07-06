@@ -17,6 +17,22 @@ static USBCDC BridgeAudioPort;
 #define BRIDGE_AUDIO_EXCLUSIVE 0
 #endif
 
+// Single visible /dev/ttyACM* on Waveshare ESP32-S3-Zero: use Serial for wire protocol.
+#ifndef BRIDGE_USE_SERIAL_FOR_AUDIO
+#define BRIDGE_USE_SERIAL_FOR_AUDIO 1
+#endif
+#if BRIDGE_USE_SERIAL_FOR_AUDIO
+#undef BRIDGE_DUAL_CDC
+#define BRIDGE_DUAL_CDC 0
+#undef BRIDGE_AUDIO_EXCLUSIVE
+#define BRIDGE_AUDIO_EXCLUSIVE 1
+#endif
+
+/** When Serial carries wire frames, suppress sketch text logs on the same port. */
+inline bool sketchSerialTextEnabled() {
+  return !BRIDGE_USE_SERIAL_FOR_AUDIO;
+}
+
 inline Stream& bridgeAudioStream() {
 #if BRIDGE_DUAL_CDC
   return BridgeAudioPort;

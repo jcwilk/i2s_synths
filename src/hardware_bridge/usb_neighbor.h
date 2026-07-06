@@ -31,6 +31,7 @@ typedef struct {
   int16_t upstreamOut[BUFFER_LEN];
   BridgeExchangeRequest queuedRequest;
   uint16_t lastStatus;
+  uint32_t lastProcessingUs;
 } UsbNeighborState;
 
 inline void usbNeighborMakeInitial(UsbNeighborState& state) {
@@ -49,9 +50,10 @@ inline void usbNeighborEnter(UsbNeighborState& state, uint8_t enterMode = BRIDGE
   state.hasLastSequence = false;
   state.streamStartUs = (uint64_t)esp_timer_get_time();
   i2sNeighborSuspend();
-  moduleSetup();
   state.lastStatus = BRIDGE_STATUS_OK;
-  bridgeLog(state.usePhysicalAdc ? "usb neighbor: enter (pwa adc)" : "usb neighbor: enter (injected)");
+  if (sketchSerialTextEnabled()) {
+    bridgeLog(state.usePhysicalAdc ? "usb neighbor: enter (pwa adc)" : "usb neighbor: enter (injected)");
+  }
 }
 
 inline void usbNeighborSetPhysicalPots(UsbNeighborState& state, const DualPotsState& pots) {
@@ -125,9 +127,19 @@ inline void usbNeighborProcessExchange(UsbNeighborState& state) {
     return;
   }
 
+  if (state.processing) {
+    state.pendingOverrun = true;
+    state.lastStatus = (uint16_t)(BRIDGE_STATUS_OK | BRIDGE_STATUS_OVERRUN);
+    return;
+  }
+
+  state.processing = true;
+  const uint64_t t0 = (uint64_t)esp_timer_get_time();
+
   uint16_t status = usbNeighborEvaluateSequence(state);
   if (status != BRIDGE_STATUS_OK) {
     state.lastStatus = status;
+    state.processing = false;
     return;
   }
 
@@ -135,6 +147,8 @@ inline void usbNeighborProcessExchange(UsbNeighborState& state) {
     memcpy(state.downstreamOut, state.downstreamIn, sizeof(state.downstreamOut));
     memcpy(state.upstreamOut, state.upstreamIn, sizeof(state.upstreamOut));
     state.lastStatus = BRIDGE_STATUS_OK;
+    state.lastProcessingUs = (uint32_t)((uint64_t)esp_timer_get_time() - t0);
+    state.processing = false;
     return;
   }
 
@@ -146,7 +160,12 @@ inline void usbNeighborProcessExchange(UsbNeighborState& state) {
   }
   moduleLoopUpstream(state.upstreamIn, state.upstreamOut, BUFFER_LEN, pots);
   moduleLoopDownstream(state.downstreamIn, state.downstreamOut, BUFFER_LEN, pots);
-  state.lastStatus = BRIDGE_STATUS_OK;
+  state.lastStatus = state.pendingOverrun
+      ? (uint16_t)(BRIDGE_STATUS_OK | BRIDGE_STATUS_OVERRUN)
+      : BRIDGE_STATUS_OK;
+  state.pendingOverrun = false;
+  state.lastProcessingUs = (uint32_t)((uint64_t)esp_timer_get_time() - t0);
+  state.processing = false;
 }
 
 inline void usbNeighborBuildResponse(const UsbNeighborState& state, BridgeExchangeResponse& response) {
@@ -156,6 +175,14 @@ inline void usbNeighborBuildResponse(const UsbNeighborState& state, BridgeExchan
   response.timestampUs = (uint32_t)((uint64_t)esp_timer_get_time() - state.streamStartUs);
   memcpy(response.downstreamOut, state.downstreamOut, sizeof(response.downstreamOut));
   memcpy(response.upstreamOut, state.upstreamOut, sizeof(response.upstreamOut));
+  if (state.usePhysicalAdc && state.hasPhysicalPots) {
+    response.primaryTelemetry = state.physicalPots.primary.smoothed;
+    response.secondaryTelemetry = state.physicalPots.secondary.smoothed;
+  } else {
+    response.primaryTelemetry = state.primaryControl;
+    response.secondaryTelemetry = state.secondaryControl;
+  }
+  response.processingUs = state.lastProcessingUs;
 }
 
 #endif  // HARDWARE_BRIDGE_USB_NEIGHBOR_H

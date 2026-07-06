@@ -109,8 +109,19 @@ export function parseExchangeResponse(inner) {
   offset += BRIDGE_AUDIO_BYTES * 2;
   const status = view.getUint16(offset, true);
   offset += 2;
-  const timestampUs = view.getUint32(offset, true);
-  return { command, sequence, downstreamOut, upstreamOut, status, timestampUs };
+  let timestampUs = 0;
+  if (offset + 4 <= inner.byteLength) {
+    timestampUs = view.getUint32(offset, true);
+    offset += 4;
+  }
+  if (offset + 8 <= inner.byteLength) {
+    offset += 8;
+  }
+  let processingUs;
+  if (offset + 4 <= inner.byteLength) {
+    processingUs = view.getUint32(offset, true);
+  }
+  return { command, sequence, downstreamOut, upstreamOut, status, timestampUs, processingUs };
 }
 
 export function parseAck(inner) {

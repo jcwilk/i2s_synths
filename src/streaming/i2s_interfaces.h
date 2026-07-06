@@ -6,6 +6,7 @@
 #include <driver/i2s_std.h>
 #include <driver/i2s_common.h>
 #include "../config/constants.h"
+#include "../config/sketch_log.h"
 #include "i2s_output.h"
 #include "i2s_input.h"
 #include "../input/pots.h"
@@ -63,7 +64,7 @@ static bool setupI2SOverlap(i2s_port_t port,
   chan_cfg.dma_desc_num = (uint32_t)I2S_DMA_BUF_COUNT;
   esp_err_t result = i2s_new_channel(&chan_cfg, &out_tx, &out_rx);
   if (result != ESP_OK) {
-    Serial.println("I2S channel allocation failed");
+    SKETCH_LOG_PRINTLN("I2S channel allocation failed");
     return false;
   }
 
@@ -89,9 +90,9 @@ static bool setupI2SOverlap(i2s_port_t port,
   const i2s_std_config_t std_cfg = { .clk_cfg = clk_cfg, .slot_cfg = slot_cfg, .gpio_cfg = gpio_cfg };
 
   result = i2s_channel_init_std_mode(out_tx, &std_cfg);
-  if (result != ESP_OK) { Serial.println("I2S TX init failed"); return false; }
+  if (result != ESP_OK) { SKETCH_LOG_PRINTLN("I2S TX init failed"); return false; }
   result = i2s_channel_init_std_mode(out_rx, &std_cfg);
-  if (result != ESP_OK) { Serial.println("I2S RX init failed"); return false; }
+  if (result != ESP_OK) { SKETCH_LOG_PRINTLN("I2S RX init failed"); return false; }
 
   return true;
 }
@@ -118,7 +119,7 @@ static inline I2SInterfaceStates setupI2SU() {
   io_states.output_state = i2s_output_make_initial(i2s_tx_u);
   io_states.output_state = i2s_output_finalize(io_states.output_state);
 
-  Serial.printf("I2SU ready: MCK=%d, BCK=%d, WS=%d, DOUT=%d, DIN=%d\n", I2SU_MCK, I2SU_SCK, I2SU_WS, I2SU_SD_OUT, I2SU_SD_IN);
+  SKETCH_LOG_PRINTF("I2SU ready: MCK=%d, BCK=%d, WS=%d, DOUT=%d, DIN=%d\n", I2SU_MCK, I2SU_SCK, I2SU_WS, I2SU_SD_OUT, I2SU_SD_IN);
   return io_states;
 }
 
@@ -139,7 +140,7 @@ static inline I2SInterfaceStates setupI2SD() {
   io_states.output_state = i2s_output_make_initial(i2s_tx_d);
   io_states.output_state = i2s_output_finalize(io_states.output_state);
 
-  Serial.printf("I2SD ready: MCK=%d, BCK=%d, WS=%d, DOUT=%d, DIN=%d\n", I2SD_MCK, I2SD_SCK, I2SD_WS, I2SD_SD_OUT, I2SD_SD_IN);
+  SKETCH_LOG_PRINTF("I2SD ready: MCK=%d, BCK=%d, WS=%d, DOUT=%d, DIN=%d\n", I2SD_MCK, I2SD_SCK, I2SD_WS, I2SD_SD_OUT, I2SD_SD_IN);
   return io_states;
 }
 

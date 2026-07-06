@@ -5,7 +5,7 @@
 #include <string.h>
 #include <math.h>
 #include <esp32-hal-psram.h>
-#include "../config/constants.h"
+#include "../config/sketch_log.h"
 #include "../input/pots.h"
 
 // Internal delay tunables (kept local to this module)
@@ -67,7 +67,7 @@ static inline void delayAllocateRing() {
 inline void moduleSetup() {
   g_effective_length01 = 0.0f;
   delayAllocateRing();
-  Serial.printf("Delay module active. Allocated frames=%d (%.1f ms)\n",
+  SKETCH_LOG_PRINTF("Delay module active. Allocated frames=%d (%.1f ms)\n",
                 g_bufferFrames,
                 1000.0f * (float)g_bufferFrames / (float)SAMPLE_RATE);
 }

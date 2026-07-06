@@ -52,7 +52,9 @@ void setup() {
   Serial.setRxBufferSize(32768);
   Serial.begin(115200);
   delay(1000);
-  Serial.println("ESP32-S3-Zero I2S Audio Processing");
+  if (sketchSerialTextEnabled()) {
+    Serial.println("ESP32-S3-Zero I2S Audio Processing");
+  }
 
   // Setup I2S interfaces (both downstream and upstream) with module processing callbacks
   i2sSetup(moduleLoopDownstream, moduleLoopUpstream);
@@ -65,7 +67,9 @@ void setup() {
 
   bridgeTransportInit();
 
-  Serial.println("Setup complete.");
+  if (sketchSerialTextEnabled()) {
+    Serial.println("Setup complete.");
+  }
   startup_time = millis();
 }
 

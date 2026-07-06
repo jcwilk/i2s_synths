@@ -1,0 +1,21 @@
+{
+  "id": "S5",
+  "platform": "Linux 6.8.0-124-generic (x64)",
+  "bridgeUrl": "ws://localhost:8766",
+  "chainLayout": "GW + WASM + HW debug_tone + WASM",
+  "expectedModuleKind": "debug_tone",
+  "firmwareModuleKind": "debug_tone",
+  "mic": false,
+  "durationS": 601.37,
+  "targetDurationS": 600,
+  "exchanges": 59331,
+  "dropCount": 25,
+  "transientErrorRate": 0.0004213648851359323,
+  "statusErrors": 25,
+  "seqGaps": 0,
+  "sustainedUnderrunWindows": 0,
+  "latencyNotes": "Bridge pipelined relay @ 5.80 ms period; PWA mixed-chain adds ring+inter-unit delays per published budget",
+  "pass": true,
+  "pwaNote": "Confirm full topology in host UI; this harness validates sustained bridge+USB duplex for the scenario module kind."
+}
+OVERALL: PASS

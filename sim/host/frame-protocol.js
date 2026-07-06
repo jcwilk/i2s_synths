@@ -12,6 +12,8 @@ export const BRIDGE_WIRE_PREFIX_SIZE = 4;
 
 export const BRIDGE_CMD_EXCHANGE_USB = 0x13;
 
+export const BRIDGE_STATUS_SEQ_GAP = 0x0040;
+
 export const FIRMWARE_MODULE_KINDS = {
   0: 'passthrough',
   1: 'delay',
@@ -56,6 +58,8 @@ export function buildExchangeRequest({ sequence, downstreamIn, upstreamIn }) {
   return wrapLengthPrefixed(new Uint8Array(buffer));
 }
 
+export const BRIDGE_STATUS_SEQ_GAP = 0x0040;
+
 export function parseExchangeResponse(buffer) {
   const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   let offset = BRIDGE_HEADER_SIZE;
@@ -66,5 +70,32 @@ export function parseExchangeResponse(buffer) {
   const upstreamOut = Int16Array.from(int16.subarray(BUFFER_LEN, BUFFER_LEN * 2));
   offset += BRIDGE_AUDIO_BYTES * 2;
   const status = view.getUint16(offset, true);
-  return { sequence, downstreamOut, upstreamOut, status };
+  offset += 2;
+  let timestampUs = 0;
+  let primaryTelemetry;
+  let secondaryTelemetry;
+  if (offset + 4 <= buffer.byteLength) {
+    timestampUs = view.getUint32(offset, true);
+    offset += 4;
+  }
+  if (offset + 8 <= buffer.byteLength) {
+    primaryTelemetry = view.getFloat32(offset, true);
+    offset += 4;
+    secondaryTelemetry = view.getFloat32(offset, true);
+    offset += 4;
+  }
+  let processingUs;
+  if (offset + 4 <= buffer.byteLength) {
+    processingUs = view.getUint32(offset, true);
+  }
+  return {
+    sequence,
+    downstreamOut,
+    upstreamOut,
+    status,
+    timestampUs,
+    primaryTelemetry,
+    secondaryTelemetry,
+    processingUs,
+  };
 }

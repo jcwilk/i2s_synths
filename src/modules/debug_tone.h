@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include <string.h>
-#include "../config/constants.h"
+#include "../config/sketch_log.h"
 #include "../input/pots.h"
 
 #ifndef DEBUG_TONE_FREQ_HZ
@@ -124,7 +124,7 @@ static inline void dtProcessDirection(int16_t* inputBufferInterleaved,
 }
 
 inline void moduleSetup() {
-  Serial.println("Debug tone module active (sine generator)");
+  SKETCH_LOG_PRINTLN("Debug tone module active (sine generator)");
   debugTonePhaseUpstream = 0.0f;
   debugTonePhaseDownstream = 0.0f;
 }

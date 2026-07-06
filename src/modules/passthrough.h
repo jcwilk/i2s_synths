@@ -3,10 +3,11 @@
 
 #include <Arduino.h>
 #include <string.h>
+#include "../config/sketch_log.h"
 #include "../input/pots.h"
 
 inline void moduleSetup() {
-  Serial.println("Passthrough module active");
+  SKETCH_LOG_PRINTLN("Passthrough module active");
 }
 
 inline void moduleLoopDownstream(int16_t* inputBuffer,

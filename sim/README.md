@@ -132,16 +132,37 @@ Each unit card owns an independent pot poll loop writing that slot's WASM struct
 
 Each processing unit card shows three scrolling peak-history graphs (4 s / 16 s / 64 s) for downstream **In** (blue) and upstream **Out** (orange). One peak sample per path per firmware buffer period (~172 Hz at 22.05 kHz / 128).
 
-## Hardware slot (Phase 2)
+## Hardware slot (Phase 2–3)
 
 | Topic | Behavior |
 |-------|----------|
 | **Limit** | At most **one** hardware-designated unit per chain |
 | **Bridge** | Local Node process relays WebSocket ↔ USB (`sim/hardware-bridge/`) |
 | **Module parity** | Slot module type must match flashed firmware before Connect |
-| **Controls** | Physical pots on device when connected; WASM sliders hidden |
-| **Async pipeline** | Ring buffers (~2 periods) decouple AudioWorklet from USB RTT |
-| **Extra latency** | USB round-trip + bridge relay + ring depth vs all-WASM chains |
+| **Controls** | Physical pots on device when connected; WASM sliders hidden; telemetry read-only on card |
+| **Async pipeline** | Ring buffers (**3** periods default, adaptive **4** on sustained underrun) |
+| **Recovery** | Transient underrun → silence; overrun → drop oldest queued exchange; sustained >5%/30s → warning |
+| **Extra latency** | See mixed-chain latency budget below |
+
+### Mixed-chain latency budget (Phase 3)
+
+| Component | Budget (periods @ 5.8 ms) | Notes |
+|-----------|---------------------------|-------|
+| Ring target occupancy | 2 | Nominal pipeline delay |
+| USB + bridge RTT (p99 planning) | 3.5 | Aligns with Phase 1 p99 ≤ 20 ms |
+| Inter-unit path delay | 1 each | Standard simulator wiring |
+| **HW between 2 WASM neighbors** | **~5.5 periods (~32 ms)** | Plus neighbor delays in longer chains |
+
+Tolerance: **±1 buffer period** for reference topology `[gateway, WASM passthrough, HW delay, WASM passthrough]`.
+
+### Latency measurement procedure
+
+1. Build reference chain: gateway → passthrough → **hardware delay** (connected) → passthrough; mic on, loopback on rightmost if needed.
+2. Flash delay firmware; connect bridge; start audio.
+3. Add a debug-tone or impulse neighbor **only on WASM** side for correlation, or use merger loopback with known delay pot setting.
+4. Compare audible/visible delay against all-WASM chain with same topology (swap hardware slot to WASM delay).
+5. Measured added delay should fall within published budget ± one buffer period (~5.8 ms).
+6. Record platform, bridge URL, and soak drop counters (`hardwareAdapter.soakSummary()` in browser console during connected session).
 
 ### Mixed-chain audition guidance
 
@@ -149,22 +170,37 @@ Compare hardware vs all-WASM chains with the **same module type** on the hardwar
 
 1. Build an all-WASM reference: e.g. gateway → passthrough → delay → passthrough (loopback on rightmost if needed).
 2. Swap the delay unit to **hardware slot**, flash matching firmware, connect bridge.
-3. Expect **additional end-to-end latency** on paths through the hardware slot (typically tens of ms from USB RTT plus ~12 ms ring depth at 22.05 kHz / 128).
-4. Merger or timing-sensitive audition through hardware may sound different from all-WASM — use passthrough neighbors for A/B of device DSP only.
+3. Expect **additional end-to-end latency** per budget table above.
+4. Merger or timing-sensitive audition through hardware may differ from all-WASM — use passthrough neighbors for A/B of device DSP only.
+
+### Phase 3 soak matrix
+
+Minimum **10 minutes** per scenario with connected board. Headless bridge relay: `node sim/hardware-bridge/phase3-soak.mjs --scenario S2`. Full PWA mixed chain: configure topology in host UI per scenario ID (S1–S6 in `design.md`), run audio 10+ min, verify zero sustained drops.
+
+| ID | Topology summary |
+|----|------------------|
+| S1 | Max chain, HW end, passthrough |
+| S2 | GW + WASM + HW delay + WASM |
+| S3 | GW + HW merger + 2 WASM |
+| S4 | GW + WASM + HW cutoff + WASM merger (loopback) |
+| S5 | GW + WASM + HW debug_tone + WASM |
+| S6 | Max interleave, HW middle, delay |
 
 ## Limitations
 
-| Area | Current behavior | Future phase |
-|------|------------------|--------------|
+| Area | Current behavior | Notes |
+|------|------------------|-------|
 | Startup mute | Not modeled (~1 s silence on device boot) | — |
-| Render quantum | Web Audio 128-frame quantum vs 128-sample firmware buffer | Phase 3 hardening |
+| Render quantum | Web Audio 128-frame quantum vs 128-sample firmware buffer | See `host/AUDIOWORKLET_CPU.md` |
 | Hardware slots | Single slot only | Phase 4+ |
-| USB latency | Visible extra delay vs all-WASM; underrun badge on starvation | Phase 3 hardening |
+| USB latency | Published budget + tolerance; recovery badges on hardware card | Phase 3 hardening |
+| Web Serial | Not available | Phase 4 |
 | Undo/redo | Delete and reorder are immediate | Future UX |
-| Tooling | Shell build + manual serve | Phase 3 npm/CI |
 | Gateway module | I/O shim only | Optional |
 
-Merger cross-path timing uses decoupled per-path delay state in the chain host (Phase 2 parity). Merger unit cards show brief **Underrun** / **Overrun** badges when the compiled module triggers those recovery paths.
+**Hardware integration deltas (known vs all-WASM):** added USB and bridge round-trip latency, async ring pipeline (3–4 periods), published mixed-chain latency budget and ±1 period tolerance, single hardware slot limit, physical-pot authoritative control with optional telemetry display.
+
+Merger cross-path timing uses decoupled per-path delay state in the chain host (Phase 2 parity). Merger and hardware unit cards show **Underrun** / **Overrun** / **Sustained drop risk** badges per recovery policy.
 
 ## Manual acceptance matrix
 
@@ -196,6 +232,8 @@ Merger cross-path timing uses decoupled per-path delay state in the chain host (
 | Chain length cap | `MAX_PROCESSING_UNITS = 8`; Add unit disabled at cap |
 | Slot order swap | `verify-wasm.mjs`: scheduler slot reorder changes first-hop impulse routing |
 | Delete/reorder DOM | Manual browser check (see acceptance matrix); handle uses `touch-action: none` |
-| Bridge relay smoke | `hardware-bridge/integration-smoke.mjs`: 30 s sustained duplex, delay firmware |
+| Bridge relay smoke | `hardware-bridge/integration-smoke.mjs`: 30 s sustained duplex |
+| Phase 3 soak | `hardware-bridge/phase3-soak.mjs`: 10 min per scenario attestation |
+| Processing budget | `hardware-bridge/processing-budget.mjs`: ESP32 <70% buffer period |
 
 **Manual browser check:** Run the acceptance matrix above on [http://localhost:8080/host/](http://localhost:8080/host/) with `./sim/build-wasm.sh` completed and bridge running.

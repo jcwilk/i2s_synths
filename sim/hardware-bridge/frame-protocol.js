@@ -41,7 +41,9 @@ export const MODULE_KIND_TO_FIRMWARE = Object.fromEntries(
 
 export const BRIDGE_AUDIO_BYTES = BUFFER_LEN * 2;
 export const BRIDGE_EXCHANGE_REQUEST_PAYLOAD_SIZE = 4 + BRIDGE_AUDIO_BYTES * 2 + 8;
-export const BRIDGE_EXCHANGE_RESPONSE_PAYLOAD_SIZE = 4 + BRIDGE_AUDIO_BYTES * 2 + 2 + 4;
+export const BRIDGE_EXCHANGE_RESPONSE_TELEMETRY_BYTES = 12;
+export const BRIDGE_EXCHANGE_RESPONSE_PAYLOAD_SIZE =
+  4 + BRIDGE_AUDIO_BYTES * 2 + 2 + 4 + BRIDGE_EXCHANGE_RESPONSE_TELEMETRY_BYTES;
 export const BRIDGE_EXCHANGE_REQUEST_SIZE = BRIDGE_HEADER_SIZE + BRIDGE_EXCHANGE_REQUEST_PAYLOAD_SIZE;
 export const BRIDGE_EXCHANGE_RESPONSE_SIZE = BRIDGE_HEADER_SIZE + BRIDGE_EXCHANGE_RESPONSE_PAYLOAD_SIZE;
 export const BRIDGE_ACK_SIZE = BRIDGE_HEADER_SIZE + 6;
@@ -129,7 +131,30 @@ export function parseExchangeResponse(inner) {
   const status = view.getUint16(offset, true);
   offset += 2;
   const timestampUs = view.getUint32(offset, true);
-  return { command, sequence, downstreamOut, upstreamOut, status, timestampUs };
+  offset += 4;
+  let primaryTelemetry;
+  let secondaryTelemetry;
+  if (offset + 8 <= inner.byteLength) {
+    primaryTelemetry = view.getFloat32(offset, true);
+    offset += 4;
+    secondaryTelemetry = view.getFloat32(offset, true);
+    offset += 4;
+  }
+  let processingUs;
+  if (offset + 4 <= inner.byteLength) {
+    processingUs = view.getUint32(offset, true);
+  }
+  return {
+    command,
+    sequence,
+    downstreamOut,
+    upstreamOut,
+    status,
+    timestampUs,
+    primaryTelemetry,
+    secondaryTelemetry,
+    processingUs,
+  };
 }
 
 export function parseAck(inner) {

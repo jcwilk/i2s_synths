@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 /**
  * Local bridge server: WebSocket ↔ USB CDC relay for PWA hardware slot.
+ * Phase 3: pipelined USB relay (depth 2), relay timing metrics.
  * Default: ws://localhost:8765
  */
 import { createServer } from 'node:http';
+import { performance } from 'node:perf_hooks';
 import { WebSocketServer } from 'ws';
 import {
   firmwareKindToName,
   BRIDGE_WIRE_PREFIX_SIZE,
+  PERIOD_MS,
 } from './frame-protocol.js';
 import {
   openAudioPort,
@@ -21,6 +24,8 @@ import {
 } from './usb-relay.js';
 
 const DEFAULT_PORT = 8765;
+const USB_PIPELINE_DEPTH = 2;
+const RELAY_P99_BUDGET_MS = 2;
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
 const portArg = args.find((a) => a.startsWith('--port='));
@@ -34,11 +39,32 @@ let activeClient = null;
 let usbPort = null;
 let sessionActive = false;
 let devicePath = DEVICE_PATH;
+let lastModuleKind = null;
+
+/** @type {{ ws: import('ws').WebSocket, request: Buffer }[]} */
+const relayQueue = [];
+let usbInFlight = 0;
+const relayTimingsMs = [];
 
 function log(...parts) {
   if (verbose) {
     console.error('[bridge]', ...parts);
   }
+}
+
+function recordRelayMs(ms) {
+  relayTimingsMs.push(ms);
+  while (relayTimingsMs.length > 500) {
+    relayTimingsMs.shift();
+  }
+}
+
+function relayP99Ms() {
+  if (relayTimingsMs.length === 0) {
+    return 0;
+  }
+  const sorted = [...relayTimingsMs].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length * 0.99)] ?? 0;
 }
 
 function statusPayload() {
@@ -49,10 +75,12 @@ function statusPayload() {
     devicePath: devicePath ?? null,
     sessionActive,
     moduleKind: sessionActive ? lastModuleKind : null,
+    relayP99Ms: relayP99Ms(),
+    relayBudgetMs: RELAY_P99_BUDGET_MS,
+    usbPipelineDepth: USB_PIPELINE_DEPTH,
+    bufferPeriodMs: PERIOD_MS,
   };
 }
-
-let lastModuleKind = null;
 
 async function resolveDevicePath() {
   if (devicePath) {
@@ -95,7 +123,6 @@ async function startSession(ws, mode = 'pwa') {
   const enterMode = mode === 'pwa' ? 1 : 0;
   await enterUsbNeighborMode(usbPort, enterMode);
   let kindId = null;
-  let lastModuleKind = null;
   try {
     kindId = await queryModuleKind(usbPort);
     lastModuleKind = firmwareKindToName(kindId);
@@ -117,6 +144,7 @@ async function stopSession(ws) {
   if (!sessionActive) {
     return;
   }
+  relayQueue.length = 0;
   try {
     if (usbPort && usbPort.isOpen) {
       await exitUsbNeighborMode(usbPort);
@@ -132,6 +160,47 @@ async function stopSession(ws) {
 
 function broadcastStatus(ws) {
   ws.send(JSON.stringify(statusPayload()));
+}
+
+async function drainRelayQueue() {
+  if (!usbPort || !sessionActive) {
+    return;
+  }
+  while (relayQueue.length > 0 && usbInFlight < USB_PIPELINE_DEPTH) {
+    const job = relayQueue.shift();
+    usbInFlight += 1;
+    const t0 = performance.now();
+    relayExchange(usbPort, job.request)
+      .then((response) => {
+        const relayMs = performance.now() - t0;
+        recordRelayMs(relayMs);
+        const wire = Buffer.alloc(BRIDGE_WIRE_PREFIX_SIZE + response.length);
+        wire.writeUInt32LE(response.length, 0);
+        response.copy(wire, BRIDGE_WIRE_PREFIX_SIZE);
+        if (job.ws.readyState === job.ws.OPEN) {
+          job.ws.send(wire, { binary: true });
+        }
+      })
+      .catch((err) => {
+        if (job.ws.readyState === job.ws.OPEN) {
+          job.ws.send(JSON.stringify({ type: 'error', message: err.message }));
+        }
+        log('relay error', err.message);
+      })
+      .finally(() => {
+        usbInFlight -= 1;
+        drainRelayQueue();
+      });
+  }
+}
+
+function enqueueRelay(ws, request) {
+  relayQueue.push({ ws, request });
+  while (relayQueue.length > USB_PIPELINE_DEPTH * 2) {
+    relayQueue.shift();
+    log('relay queue drop (overrun)');
+  }
+  drainRelayQueue();
 }
 
 async function handleControlMessage(ws, msg) {
@@ -199,11 +268,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Binary frame too short' }));
           return;
         }
-        const response = await relayExchange(usbPort, request);
-        const wire = Buffer.alloc(BRIDGE_WIRE_PREFIX_SIZE + response.length);
-        wire.writeUInt32LE(response.length, 0);
-        response.copy(wire, BRIDGE_WIRE_PREFIX_SIZE);
-        ws.send(wire, { binary: true });
+        enqueueRelay(ws, request);
         return;
       }
 
@@ -220,6 +285,7 @@ wss.on('connection', (ws) => {
     if (activeClient === ws) {
       activeClient = null;
     }
+    relayQueue.length = 0;
     if (sessionActive) {
       await stopSession(ws);
     }

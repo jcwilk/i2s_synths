@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include <string.h>
-#include "../config/constants.h"
+#include "../config/sketch_log.h"
 #include "../ui/neopixel.h"
 #include "../input/pots.h"
 
@@ -211,7 +211,7 @@ inline void moduleSetup() {
 
   mergerCurrentScaleRatio = 1.0f;
 
-  Serial.println("Merger module initialized");
+  SKETCH_LOG_PRINTLN("Merger module initialized");
 #if MERGER_ENABLE_DS_TO_US_FORWARD
   mergerRevRingHead = 0;
   mergerRevRingTail = 0;

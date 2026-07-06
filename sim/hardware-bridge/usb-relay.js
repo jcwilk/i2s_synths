@@ -137,11 +137,12 @@ export async function openAudioPort(portPath, baudRate = 115200) {
     port.open((error) => (error ? reject(error) : resolve()));
   });
   attachBridgeReader(port);
+  await new Promise((r) => setTimeout(r, 2500));
   await drainIncoming(port, 500);
   return port;
 }
 
-async function drainIncoming(port, quietMs = 250, maxMs = 5000) {
+async function drainIncoming(port, quietMs = 500, maxMs = 8000) {
   const started = Date.now();
   let lastData = started;
   return new Promise((resolve) => {

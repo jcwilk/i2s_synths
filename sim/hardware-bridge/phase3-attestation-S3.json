@@ -1,0 +1,21 @@
+{
+  "id": "S3",
+  "platform": "Linux 6.8.0-124-generic (x64)",
+  "bridgeUrl": "ws://localhost:8766",
+  "chainLayout": "GW + HW merger + 2 WASM",
+  "expectedModuleKind": "merger",
+  "firmwareModuleKind": "merger",
+  "mic": true,
+  "durationS": 605.682,
+  "targetDurationS": 600,
+  "exchanges": 67925,
+  "dropCount": 19,
+  "transientErrorRate": 0.0002797202797202797,
+  "statusErrors": 19,
+  "seqGaps": 0,
+  "sustainedUnderrunWindows": 0,
+  "latencyNotes": "Bridge pipelined relay @ 5.80 ms period; PWA mixed-chain adds ring+inter-unit delays per published budget",
+  "pass": true,
+  "pwaNote": "Confirm full topology in host UI; this harness validates sustained bridge+USB duplex for the scenario module kind."
+}
+OVERALL: PASS

@@ -12,6 +12,8 @@ export const MERGER_STRESS_REV_OVERRUN = 4;
 
 /** Hardware underrun indicator for unit cards. */
 export const HARDWARE_STRESS_UNDERRUN = 8;
+export const HARDWARE_STRESS_OVERRUN = 16;
+export const HARDWARE_STRESS_SUSTAINED = 32;
 
 /**
  * Routes firmware-sized buffers through gateway (index 0) plus N processing slots.
@@ -187,10 +189,21 @@ export class ChainScheduler {
         dsOut[slot].set(hwResult.downstreamOut);
         usOut[slot].set(hwResult.upstreamOut);
         const meter = this.hardwareAdapter.getMeterLevels();
+        let stress = 0;
+        if (hwResult.underrun) {
+          stress |= HARDWARE_STRESS_UNDERRUN;
+        }
+        if (hwResult.sustained || meter.sustained) {
+          stress |= HARDWARE_STRESS_SUSTAINED;
+        }
+        if (meter.overrun) {
+          stress |= HARDWARE_STRESS_OVERRUN;
+        }
         levels[slot] = {
           in: meter.in,
           out: meter.out,
-          stress: hwResult.underrun ? HARDWARE_STRESS_UNDERRUN : 0,
+          stress,
+          telemetry: { ...this.hardwareAdapter.telemetry },
         };
       } else if (slotConfig.hardwareDesignated && !slotConfig.hardwareConnected) {
         dsOut[slot].fill(0);

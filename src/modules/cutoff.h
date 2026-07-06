@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include <string.h>
-#include "../config/constants.h"
+#include "../config/sketch_log.h"
 #include "../input/pots.h"
 
 static const float CUTOFF_MIN_HZ = 200.0f;
@@ -83,7 +83,7 @@ inline void moduleSetup() {
   analogReadResolution(12);
   tptInit();
   tptSetCutoff(1000.0f);
-  Serial.println("Cutoff module initialized (LP/HP, intensity centered at 50%)");
+  SKETCH_LOG_PRINTLN("Cutoff module initialized (LP/HP, intensity centered at 50%)");
 }
 
 inline void moduleLoopUpstream(int16_t* inputBuffer,

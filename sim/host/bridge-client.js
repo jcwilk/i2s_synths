@@ -1,5 +1,6 @@
 /**
  * WebSocket client for local hardware bridge server.
+ * Phase 3: depth-2 pipelined binary exchanges matched by sequence.
  */
 export class BridgeClient {
   /**
@@ -16,12 +17,11 @@ export class BridgeClient {
     this.devicePath = null;
     this.onStatus = () => {};
     this.onError = () => {};
-    /** @type {Promise<ArrayBuffer> | null} */
-    this._pendingBinary = null;
-    /** @type {((buf: ArrayBuffer) => void) | null} */
-    this._binaryResolver = null;
+    /** @type {Map<number, { resolve: (buf: ArrayBuffer) => void, reject: (err: Error) => void, timer: ReturnType<typeof setTimeout> }>} */
+    this._pendingBySequence = new Map();
     /** @type {((status: object) => void) | null} */
     this._sessionWaiter = null;
+    this.maxInFlight = 2;
   }
 
   connect() {
@@ -49,17 +49,13 @@ export class BridgeClient {
         this.bridgeReachable = false;
         this.deviceAttached = false;
         this.sessionActive = false;
+        this._rejectAllPending(new Error('Bridge connection closed'));
         this.onStatus(this.statusSnapshot());
       };
 
       ws.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-          if (this._binaryResolver) {
-            const resolve = this._binaryResolver;
-            this._binaryResolver = null;
-            this._pendingBinary = null;
-            resolve(event.data);
-          }
+          this._resolveBinaryResponse(event.data);
           return;
         }
         const text = typeof event.data === 'string' ? event.data : String(event.data);
@@ -71,6 +67,43 @@ export class BridgeClient {
         }
       };
     });
+  }
+
+  _rejectAllPending(err) {
+    for (const [, pending] of this._pendingBySequence) {
+      clearTimeout(pending.timer);
+      pending.reject(err);
+    }
+    this._pendingBySequence.clear();
+  }
+
+  _resolveBinaryResponse(data) {
+    const buf = new Uint8Array(data);
+    if (buf.length < 8) {
+      return;
+    }
+    const inner = buf.subarray(4);
+    const view = new DataView(inner.buffer, inner.byteOffset, inner.byteLength);
+    if (inner.byteLength < 10) {
+      return;
+    }
+    const sequence = view.getUint32(6, true);
+    const pending = this._pendingBySequence.get(sequence);
+    if (!pending) {
+      const fifoKey = this._pendingBySequence.keys().next().value;
+      if (fifoKey !== undefined) {
+        const fifoPending = this._pendingBySequence.get(fifoKey);
+        if (fifoPending) {
+          clearTimeout(fifoPending.timer);
+          this._pendingBySequence.delete(fifoKey);
+          fifoPending.resolve(data);
+        }
+      }
+      return;
+    }
+    clearTimeout(pending.timer);
+    this._pendingBySequence.delete(sequence);
+    pending.resolve(data);
   }
 
   _handleControl(msg) {
@@ -145,6 +178,7 @@ export class BridgeClient {
     }
     this.ws.send(JSON.stringify({ type: 'session', action: 'stop' }));
     this.sessionActive = false;
+    this._rejectAllPending(new Error('Session stopped'));
   }
 
   disconnect() {
@@ -155,31 +189,28 @@ export class BridgeClient {
     this.bridgeReachable = false;
     this.deviceAttached = false;
     this.sessionActive = false;
+    this._rejectAllPending(new Error('Disconnected'));
   }
 
   /**
    * @param {Uint8Array} requestBytes length-prefixed wire frame
+   * @param {number} sequence exchange sequence for response matching
    * @returns {Promise<ArrayBuffer>}
    */
-  relayExchange(requestBytes) {
+  relayExchange(requestBytes, sequence) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.sessionActive) {
       return Promise.reject(new Error('No active bridge session'));
     }
-    if (this._pendingBinary) {
-      return Promise.reject(new Error('Exchange already in flight'));
+    if (this._pendingBySequence.size >= this.maxInFlight) {
+      return Promise.reject(new Error('Exchange pipeline full'));
     }
-    this._pendingBinary = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this._binaryResolver = null;
-        this._pendingBinary = null;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this._pendingBySequence.delete(sequence);
         reject(new Error('Exchange relay timeout'));
       }, 15000);
-      this._binaryResolver = (buf) => {
-        clearTimeout(timeout);
-        resolve(buf);
-      };
+      this._pendingBySequence.set(sequence, { resolve, reject, timer });
+      this.ws.send(requestBytes);
     });
-    this.ws.send(requestBytes);
-    return this._pendingBinary;
   }
 }

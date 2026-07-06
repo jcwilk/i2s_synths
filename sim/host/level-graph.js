@@ -1,8 +1,10 @@
+import { SAMPLE_RATE, BUFFER_LEN } from '../shared/audio-constants.js';
+
 /** Canvas redraw rate (Hz). */
 export const LEVEL_RENDER_HZ = 30;
 
-/** Peak samples arrive with each firmware audio buffer (~512 @ 44.1 kHz). */
-export const AUDIO_PEAK_HZ = 44100 / 512;
+/** Peak samples arrive with each firmware audio buffer. */
+export const AUDIO_PEAK_HZ = SAMPLE_RATE / BUFFER_LEN;
 
 /** Bottom of the log scale (dBFS). */
 export const DB_FLOOR = -54;
