@@ -43,9 +43,25 @@ Open [http://localhost:8080/host/](http://localhost:8080/host/).
 
 1. Mark one unit as **Hardware slot**
 2. Select matching module type (e.g. delay)
-3. Confirm bridge URL (`ws://localhost:8765`)
-4. Click **Connect** on the hardware unit card
-5. Start audio and enable microphone
+3. Choose **Bridge** transport on the unit card (or Web Serial in Chrome — see coexistence below)
+4. Confirm bridge URL (`ws://localhost:8765`) when using bridge transport
+5. Click **Connect** on the hardware unit card
+6. Start audio and enable microphone
+
+Full operator guide: [`../HARDWARE_OPERATOR.md`](../HARDWARE_OPERATOR.md)
+
+## Web Serial coexistence and port exclusivity
+
+Chrome and Edge can connect **directly** via Web Serial without this bridge process. Bridge remains required for Firefox, Safari, and cross-browser QA.
+
+| Situation | Guidance |
+|-----------|----------|
+| Web Serial session active in PWA | Stop bridge or do not start it — browser holds the USB port |
+| Bridge session active | Web Serial connect in PWA fails with port-busy guidance |
+| Flash / upload | Disconnect PWA and stop bridge before `scripts/upload.sh` |
+| Same machine, both transports | **Mutually exclusive** — only one may hold `/dev/ttyACM*` |
+
+The PWA enforces exclusivity at connect time and surfaces actionable errors. See troubleshooting in [`../HARDWARE_OPERATOR.md`](../HARDWARE_OPERATOR.md#port-busy--conflicts).
 
 ## Protocol
 
@@ -68,6 +84,8 @@ Published planning budget for hardware slot substitution (22.05 kHz mono, 128-sa
 **Example:** hardware slot between two WASM neighbors: **~2 + 3.5 = 5.5 periods (~32 ms)** plus per-neighbor delays in longer chains.
 
 Acceptance tolerance: measured added delay within **±1 buffer period** for reference topology `[gateway, WASM passthrough, HW delay, WASM passthrough]` (see `sim/README.md` measurement procedure).
+
+**Web Serial path:** same USB RTT budget applies; bridge relay row (~0.5–1 periods) does not apply when using direct Web Serial transport in the PWA. See [`../HARDWARE_OPERATOR.md`](../HARDWARE_OPERATOR.md#mixed-chain-latency-both-transports).
 
 ## USB pipelining and ring depth (OS guidance)
 
@@ -115,7 +133,8 @@ FIRMWARE_PORT=/dev/ttyACM0 node sim/hardware-bridge/processing-budget.mjs
 | Module mismatch | Flash firmware for the module type selected on the hardware slot |
 | Underrun / sustained badge | USB latency; ring depth 3–4; see OS table above |
 | Sequence gap | Power-cycle not required — disconnect hardware slot and reconnect |
-| Port conflict | Bridge on 8765; use `npx serve sim -p 8080` for static host |
+| Port conflict | Bridge on 8765; use `npx serve sim -p 8080` for static host; disconnect PWA Web Serial before starting bridge on same device |
+| Web Serial in use | Stop PWA session or use bridge-only on other browsers — see [`../HARDWARE_OPERATOR.md`](../HARDWARE_OPERATOR.md) |
 
 ## Single-client model
 

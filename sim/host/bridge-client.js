@@ -1,30 +1,81 @@
 /**
  * WebSocket client for local hardware bridge server.
- * Phase 3: depth-2 pipelined binary exchanges matched by sequence.
+ * Phase 4: implements shared hardware transport interface with session states.
  */
+import {
+  TRANSPORT_BRIDGE,
+  SESSION_DISCONNECTED,
+  SESSION_CONNECTING,
+  SESSION_ACTIVE,
+  SESSION_DEGRADED,
+  SESSION_RECONNECTING,
+  claimPortExclusive,
+  releasePortExclusive,
+  currentPortHolder,
+  portBusyMessage,
+  isWebSerialAvailable,
+} from './hardware-transport.js';
+
 export class BridgeClient {
   /**
    * @param {string} url
    */
   constructor(url) {
+    this.transportKind = TRANSPORT_BRIDGE;
     this.url = url;
     /** @type {WebSocket | null} */
     this.ws = null;
     this.bridgeReachable = false;
     this.deviceAttached = false;
-    this.sessionActive = false;
+    /** @type {import('./hardware-transport.js').HardwareSessionState} */
+    this.sessionState = SESSION_DISCONNECTED;
     this.firmwareModuleKind = null;
     this.devicePath = null;
+    this.lastError = null;
+    this.reconnectAttempt = 0;
+    this.fatalError = false;
     this.onStatus = () => {};
-    this.onError = () => {};
+    this.onError = (message) => {
+      this.lastError = message;
+    };
+    this.onLinkLoss = () => {};
     /** @type {Map<number, { resolve: (buf: ArrayBuffer) => void, reject: (err: Error) => void, timer: ReturnType<typeof setTimeout> }>} */
     this._pendingBySequence = new Map();
     /** @type {((status: object) => void) | null} */
     this._sessionWaiter = null;
     this.maxInFlight = 2;
+    this._hadActiveSession = false;
+  }
+
+  get sessionActive() {
+    return this.sessionState === SESSION_ACTIVE;
+  }
+
+  _setState(state) {
+    this.sessionState = state;
+    this.onStatus(this.statusSnapshot());
+  }
+
+  statusSnapshot() {
+    return {
+      transportKind: TRANSPORT_BRIDGE,
+      transportAvailable: true,
+      bridgeReachable: this.bridgeReachable,
+      deviceAttached: this.deviceAttached,
+      sessionActive: this.sessionActive,
+      sessionState: this.sessionState,
+      firmwareModuleKind: this.firmwareModuleKind,
+      devicePath: this.devicePath,
+      lastError: this.lastError,
+      reconnectAttempt: this.reconnectAttempt,
+      webSerialAvailable: isWebSerialAvailable(),
+    };
   }
 
   connect() {
+    if (currentPortHolder() === 'webserial') {
+      return Promise.reject(new Error(portBusyMessage(TRANSPORT_BRIDGE)));
+    }
     return new Promise((resolve, reject) => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         resolve();
@@ -37,6 +88,7 @@ export class BridgeClient {
       ws.onopen = () => {
         this.bridgeReachable = true;
         ws.send(JSON.stringify({ type: 'ping' }));
+        this.onStatus(this.statusSnapshot());
         resolve();
       };
 
@@ -46,11 +98,18 @@ export class BridgeClient {
       };
 
       ws.onclose = () => {
+        const wasActive = this._hadActiveSession;
         this.bridgeReachable = false;
         this.deviceAttached = false;
-        this.sessionActive = false;
+        this._hadActiveSession = false;
         this._rejectAllPending(new Error('Bridge connection closed'));
-        this.onStatus(this.statusSnapshot());
+        if (wasActive && !this.fatalError) {
+          this.sessionState = SESSION_DEGRADED;
+          this.onStatus(this.statusSnapshot());
+          this.onLinkLoss();
+        } else if (!this.fatalError) {
+          this._setState(SESSION_DISCONNECTED);
+        }
       };
 
       ws.onmessage = (event) => {
@@ -117,19 +176,29 @@ export class BridgeClient {
       if (msg.devicePath !== undefined) {
         this.devicePath = msg.devicePath;
       }
-      if (msg.sessionActive !== undefined) {
-        this.sessionActive = msg.sessionActive;
+      if (msg.sessionActive !== undefined && msg.type === 'status') {
+        if (!msg.sessionActive && this.sessionState === SESSION_ACTIVE) {
+          this._hadActiveSession = false;
+          this.sessionState = SESSION_DEGRADED;
+          this.onLinkLoss();
+        }
       }
       if (msg.firmwareModuleKind !== undefined) {
         this.firmwareModuleKind = msg.firmwareModuleKind;
       }
       if (msg.action === 'started' && msg.firmwareModuleKind) {
         this.firmwareModuleKind = msg.firmwareModuleKind;
-        this.sessionActive = true;
+        this._setState(SESSION_ACTIVE);
+        this._hadActiveSession = true;
+        claimPortExclusive(TRANSPORT_BRIDGE);
       }
       if (msg.action === 'stopped') {
-        this.sessionActive = false;
         this.firmwareModuleKind = null;
+        this._hadActiveSession = false;
+        if (!this.fatalError && this.sessionState !== SESSION_DEGRADED) {
+          this._setState(SESSION_DISCONNECTED);
+        }
+        releasePortExclusive(TRANSPORT_BRIDGE);
       }
       const snapshot = this.statusSnapshot();
       this.onStatus(snapshot);
@@ -142,30 +211,30 @@ export class BridgeClient {
     }
     if (msg.type === 'error') {
       this.onError(msg.message);
+      if (msg.message?.includes('port') || msg.message?.includes('busy')) {
+        this.lastError = msg.message;
+      }
     }
-  }
-
-  statusSnapshot() {
-    return {
-      bridgeReachable: this.bridgeReachable,
-      deviceAttached: this.deviceAttached,
-      sessionActive: this.sessionActive,
-      firmwareModuleKind: this.firmwareModuleKind,
-      devicePath: this.devicePath,
-    };
   }
 
   async startSession(mode = 'pwa') {
+    if (currentPortHolder() === 'webserial') {
+      throw new Error(portBusyMessage(TRANSPORT_BRIDGE));
+    }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       await this.connect();
     }
+    this._setState(SESSION_CONNECTING);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this._sessionWaiter = null;
+        this._setState(SESSION_DISCONNECTED);
         reject(new Error('Session start timeout'));
       }, 10000);
       this._sessionWaiter = (status) => {
         clearTimeout(timeout);
+        this.fatalError = false;
+        this.reconnectAttempt = 0;
         resolve(status);
       };
       this.ws.send(JSON.stringify({ type: 'session', action: 'start', mode }));
@@ -177,8 +246,42 @@ export class BridgeClient {
       return;
     }
     this.ws.send(JSON.stringify({ type: 'session', action: 'stop' }));
-    this.sessionActive = false;
+    this._hadActiveSession = false;
+    this.firmwareModuleKind = null;
+    releasePortExclusive(TRANSPORT_BRIDGE);
+    if (this.sessionState !== SESSION_DEGRADED && this.sessionState !== SESSION_RECONNECTING) {
+      this._setState(SESSION_DISCONNECTED);
+    }
     this._rejectAllPending(new Error('Session stopped'));
+  }
+
+  async reconnect() {
+    if (this.fatalError) {
+      throw new Error(this.lastError ?? 'Fatal error — disconnect and reconnect manually');
+    }
+    this._setState(SESSION_RECONNECTING);
+    this.reconnectAttempt += 1;
+    this.onStatus(this.statusSnapshot());
+    try {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        await this.connect();
+      }
+      return await this.startSession('pwa');
+    } catch (err) {
+      this._setState(SESSION_DEGRADED);
+      this.lastError = err.message;
+      this.onError(err.message);
+      throw err;
+    }
+  }
+
+  markFatal(message) {
+    this.fatalError = true;
+    this.lastError = message;
+    this._hadActiveSession = false;
+    this._setState(SESSION_DISCONNECTED);
+    releasePortExclusive(TRANSPORT_BRIDGE);
+    this._rejectAllPending(new Error(message));
   }
 
   disconnect() {
@@ -188,7 +291,12 @@ export class BridgeClient {
     }
     this.bridgeReachable = false;
     this.deviceAttached = false;
-    this.sessionActive = false;
+    this._hadActiveSession = false;
+    releasePortExclusive(TRANSPORT_BRIDGE);
+    this._setState(SESSION_DISCONNECTED);
+    this.fatalError = false;
+    this.reconnectAttempt = 0;
+    this.lastError = null;
     this._rejectAllPending(new Error('Disconnected'));
   }
 

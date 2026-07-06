@@ -221,6 +221,26 @@
     .hw-chip.hw-offline { border-color: #5a3030; color: #c88; }
     .hw-chip.hw-warn { border-color: #8a7800; color: #ffd866; }
     .hw-chip.hw-mismatch { border-color: #8a3030; color: #ffaaaa; }
+    .hw-degraded-banner {
+      margin-top: 0.35rem;
+      padding: 0.45rem 0.55rem;
+      border-radius: 6px;
+      background: #3a2800;
+      border: 1px solid #8a6800;
+      font-size: 0.82rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .hw-degraded-banner[hidden] { display: none; }
+    .hw-degraded-text { color: #ffd866; font-weight: 600; }
+    .hw-reconnect-btn {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.8rem;
+    }
+    .hw-transport-label { margin-top: 0.35rem; }
+    .hw-transport-select { width: 100%; margin-bottom: 0.35rem; }
     .bridge-settings { margin-top: 0.75rem; }
     .unit-card.is-hardware { border-color: #4a6080; }
     .wasm-pots[disabled-section] { opacity: 0.5; }

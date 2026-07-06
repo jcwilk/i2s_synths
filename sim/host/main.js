@@ -17,7 +17,19 @@ import {
   LEVEL_GRAPH_SPEEDS,
 } from './level-graph.js';
 import { BridgeClient } from './bridge-client.js';
+import { WebSerialTransport } from './web-serial-transport.js';
 import { HardwareSlotAdapter } from './hardware-slot-adapter.js';
+import { HardwareSessionManager } from './hardware-session-manager.js';
+import {
+  TRANSPORT_BRIDGE,
+  TRANSPORT_WEB_SERIAL,
+  isWebSerialAvailable,
+  SESSION_ACTIVE,
+  SESSION_DEGRADED,
+  SESSION_RECONNECTING,
+  SESSION_DISCONNECTED,
+  AUTO_RETRY_MAX,
+} from './hardware-transport.js';
 import { SAMPLE_RATE, BUFFER_RATE_HZ } from '../shared/audio-constants.js';
 
 const MODULES = {
@@ -44,7 +56,32 @@ const DEFAULT_BRIDGE_URL = 'ws://localhost:8765';
 const bridgeClient = new BridgeClient(
   localStorage.getItem('bridgeUrl') ?? DEFAULT_BRIDGE_URL,
 );
+const webSerialTransport = new WebSerialTransport();
+
+/** @type {import('./bridge-client.js').BridgeClient | import('./web-serial-transport.js').WebSerialTransport} */
+let activeTransport = bridgeClient;
+
+function createSessionManager() {
+  return new HardwareSessionManager(activeTransport);
+}
+
+/** @type {HardwareSessionManager | null} */
+let hardwareSessionManager = null;
+
 const hardwareAdapter = new HardwareSlotAdapter(bridgeClient);
+
+function setActiveTransport(kind) {
+  if (kind === TRANSPORT_WEB_SERIAL && isWebSerialAvailable()) {
+    activeTransport = webSerialTransport;
+  } else {
+    activeTransport = bridgeClient;
+  }
+  hardwareAdapter.transport = activeTransport;
+  if (hardwareSessionManager) {
+    hardwareSessionManager.transport = activeTransport;
+    hardwareSessionManager.transport.onLinkLoss = () => hardwareSessionManager._handleLinkLoss();
+  }
+}
 
 const engine = new SimAudioEngine();
 const scheduler = new ChainScheduler();
@@ -134,7 +171,7 @@ function syncBindingsToScheduler() {
   scheduler.setSlots(units.map((u) => ({
     bindings: u.hardwareDesignated ? null : u.bindings,
     hardwareDesignated: u.hardwareDesignated,
-    hardwareConnected: u.hardwareConnected,
+    hardwareConnected: u.hardwareConnected || u.hardwareDegraded,
   })));
   const rightmost = units[units.length - 1];
   scheduler.setLoopbackEnabled(rightmost?.loopbackEnabled ?? false);
@@ -162,13 +199,21 @@ hardwareAdapter.onFatal = (message) => {
   ui.status.textContent = `Hardware session ended: ${message}`;
   const hwUnit = hardwareDesignatedUnit();
   if (hwUnit?.hardwareConnected) {
-    hwUnit.disconnectHardware().catch(() => {});
+    hwUnit.handleFatalDisconnect(message).catch(() => {});
   }
 };
 
-bridgeClient.onStatus = () => {
-  refreshBridgeStatusChips();
-};
+function bindTransportStatus(transport) {
+  transport.onStatus = () => {
+    refreshBridgeStatusChips();
+  };
+  transport.onError = (message) => {
+    ui.status.textContent = `Hardware transport: ${message}`;
+  };
+}
+
+bindTransportStatus(bridgeClient);
+bindTransportStatus(webSerialTransport);
 
 bridgeClient.onError = (message) => {
   ui.status.textContent = `Bridge: ${message}`;
@@ -286,6 +331,8 @@ class ProcessingUnit {
     this.loopbackEnabled = false;
     this.hardwareDesignated = false;
     this.hardwareConnected = false;
+    this.hardwareDegraded = false;
+    this.transportKind = TRANSPORT_BRIDGE;
     this.potTargets = { primary: 0.5, secondary: 0 };
     this.levelGraphs = [];
     this.levelSampler = null;
@@ -308,7 +355,17 @@ class ProcessingUnit {
           <label class="hardware-label" for="hw-u${index}" style="margin:0;">Hardware slot</label>
         </div>
         <div class="hardware-controls" hidden>
+          <label class="hw-transport-label">Transport</label>
+          <select class="hw-transport-select">
+            <option value="bridge">Bridge (WebSocket)</option>
+            <option value="webserial">Web Serial (Chrome/Edge)</option>
+          </select>
           <div class="hw-status-chips row" aria-live="polite"></div>
+          <div class="hw-degraded-banner" hidden role="alert">
+            <span class="hw-degraded-text">Connection lost</span>
+            <button type="button" class="hw-reconnect-btn">Reconnect</button>
+            <span class="hw-retry-hint hint"></span>
+          </div>
           <div class="hw-telemetry row" hidden aria-live="polite">
             <span class="hw-telemetry-primary hint">Pot A: —</span>
             <span class="hw-telemetry-secondary hint">Pot B: —</span>
@@ -350,7 +407,11 @@ class ProcessingUnit {
     this.hardwareToggle = this.card.querySelector('.hardware-toggle');
     this.hardwareLabel = this.card.querySelector('.hardware-label');
     this.hardwareControls = this.card.querySelector('.hardware-controls');
+    this.hwTransportSelect = this.card.querySelector('.hw-transport-select');
     this.hardwareStatusChips = this.card.querySelector('.hw-status-chips');
+    this.hwDegradedBanner = this.card.querySelector('.hw-degraded-banner');
+    this.hwReconnectBtn = this.card.querySelector('.hw-reconnect-btn');
+    this.hwRetryHint = this.card.querySelector('.hw-retry-hint');
     this.hwTelemetryRow = this.card.querySelector('.hw-telemetry');
     this.hwTelemetryPrimary = this.card.querySelector('.hw-telemetry-primary');
     this.hwTelemetrySecondary = this.card.querySelector('.hw-telemetry-secondary');
@@ -426,6 +487,25 @@ class ProcessingUnit {
         ui.status.textContent = `Hardware disconnect failed: ${err.message}`;
       });
     });
+
+    this.hwReconnectBtn.addEventListener('click', () => {
+      this.reconnectHardware().catch((err) => {
+        ui.status.textContent = `Hardware reconnect failed: ${err.message}`;
+      });
+    });
+
+    this.hwTransportSelect.addEventListener('change', () => {
+      if (this.hardwareConnected || this.hardwareDegraded) {
+        this.hwTransportSelect.value = this.transportKind;
+        ui.status.textContent = 'Disconnect hardware before switching transport';
+        return;
+      }
+      this.transportKind = this.hwTransportSelect.value;
+      setActiveTransport(this.transportKind);
+      this.updateHardwareStatus();
+    });
+
+    this._initTransportSelect();
 
     this.loopbackCheckbox.addEventListener('change', () => {
       this.loopbackEnabled = this.loopbackCheckbox.checked;
@@ -572,27 +652,74 @@ class ProcessingUnit {
     syncBindingsToScheduler();
   }
 
+  _initTransportSelect() {
+    const wsOption = this.hwTransportSelect.querySelector('option[value="webserial"]');
+    if (!isWebSerialAvailable()) {
+      wsOption.disabled = true;
+      wsOption.textContent = 'Web Serial (unavailable in this browser)';
+      this.transportKind = TRANSPORT_BRIDGE;
+      this.hwTransportSelect.value = TRANSPORT_BRIDGE;
+    } else {
+      wsOption.disabled = false;
+    }
+    setActiveTransport(this.transportKind);
+  }
+
   updateHardwareStatus() {
     if (!this.hardwareDesignated) {
       return;
     }
-    const s = bridgeClient.statusSnapshot();
+    const s = activeTransport.statusSnapshot();
     const chips = [];
-    if (!s.bridgeReachable) {
-      chips.push('<span class="hw-chip hw-offline">Bridge offline</span>');
-    } else if (!s.deviceAttached) {
-      chips.push('<span class="hw-chip">Bridge online</span>');
-      chips.push('<span class="hw-chip hw-warn">No device</span>');
+    if (s.transportKind === TRANSPORT_BRIDGE) {
+      if (!s.bridgeReachable) {
+        chips.push('<span class="hw-chip hw-offline">Bridge offline</span>');
+      } else if (!s.deviceAttached) {
+        chips.push('<span class="hw-chip">Bridge online</span>');
+        chips.push('<span class="hw-chip hw-warn">No device</span>');
+      } else {
+        chips.push('<span class="hw-chip">Device attached</span>');
+      }
     } else {
-      chips.push('<span class="hw-chip">Device attached</span>');
+      chips.push('<span class="hw-chip">Web Serial</span>');
+      if (!s.deviceAttached) {
+        chips.push('<span class="hw-chip hw-warn">No port selected</span>');
+      } else {
+        chips.push('<span class="hw-chip">Port open</span>');
+      }
     }
-    if (this.hardwareConnected && s.sessionActive) {
+    if (s.sessionState === SESSION_ACTIVE) {
       chips.push('<span class="hw-chip hw-active">Session active</span>');
+    } else if (s.sessionState === SESSION_DEGRADED) {
+      chips.push('<span class="hw-chip hw-warn">Connection lost</span>');
+    } else if (s.sessionState === SESSION_RECONNECTING) {
+      chips.push('<span class="hw-chip hw-warn">Reconnecting…</span>');
+    }
+    if (s.reconnectAttempt > 0) {
+      chips.push(`<span class="hw-chip">Retry ${s.reconnectAttempt}/${AUTO_RETRY_MAX}</span>`);
     }
     if (s.firmwareModuleKind && this.moduleKey !== s.firmwareModuleKind) {
       chips.push('<span class="hw-chip hw-mismatch">Module mismatch</span>');
     }
     this.hardwareStatusChips.innerHTML = chips.join('');
+    this._updateDegradedBanner(s);
+  }
+
+  _updateDegradedBanner(s) {
+    const showDegraded = this.hardwareDegraded
+      || s.sessionState === SESSION_DEGRADED
+      || s.sessionState === SESSION_RECONNECTING;
+    this.hwDegradedBanner.hidden = !showDegraded;
+    if (this.hwRetryHint) {
+      if (s.sessionState === SESSION_RECONNECTING) {
+        this.hwRetryHint.textContent = `Attempt ${s.reconnectAttempt}…`;
+      } else if (s.reconnectAttempt > 0 && s.reconnectAttempt < AUTO_RETRY_MAX) {
+        this.hwRetryHint.textContent = `Auto-retry ${s.reconnectAttempt}/${AUTO_RETRY_MAX}`;
+      } else {
+        this.hwRetryHint.textContent = '';
+      }
+    }
+    this.hwReconnectBtn.disabled = s.sessionState === SESSION_RECONNECTING;
   }
 
   refreshHardwareUi() {
@@ -600,16 +727,18 @@ class ProcessingUnit {
     this.hardwareControls.hidden = !designated;
     this.card.classList.toggle('is-hardware', designated);
     const connected = this.hardwareConnected;
-    this.wasmPots.hidden = designated && connected;
-    this.hwPotHint.hidden = !(designated && connected);
+    const activeOrDegraded = connected || this.hardwareDegraded;
+    this.wasmPots.hidden = designated && activeOrDegraded && !this.hardwareDegraded;
+    this.hwPotHint.hidden = !(designated && connected && !this.hardwareDegraded);
     if (this.hwTelemetryRow) {
-      this.hwTelemetryRow.hidden = !(designated && connected);
+      this.hwTelemetryRow.hidden = !(designated && connected && !this.hardwareDegraded);
     }
-    this.primaryPot.disabled = designated && connected;
-    this.secondaryPot.disabled = designated && connected;
+    this.primaryPot.disabled = designated && activeOrDegraded;
+    this.secondaryPot.disabled = designated && activeOrDegraded;
     this.moduleSelect.disabled = connected;
     this.hwConnectBtn.hidden = connected;
-    this.hwDisconnectBtn.hidden = !connected;
+    this.hwDisconnectBtn.hidden = !connected && !this.hardwareDegraded;
+    this.hwTransportSelect.disabled = activeOrDegraded;
     this.updateHardwareStatus();
   }
 
@@ -638,30 +767,99 @@ class ProcessingUnit {
     if (!this.hardwareDesignated || this.hardwareConnected) {
       return;
     }
-    await bridgeClient.connect();
-    const status = await bridgeClient.startSession('pwa');
-    if (status.firmwareModuleKind && status.firmwareModuleKind !== this.moduleKey) {
-      await bridgeClient.stopSession();
+    setActiveTransport(this.transportKind);
+    hardwareSessionManager = createSessionManager();
+    hardwareSessionManager.onStateChange = (state) => {
+      if (state === SESSION_DEGRADED) {
+        this.hardwareDegraded = true;
+        this.hardwareConnected = true;
+        hardwareAdapter.connected = true;
+      } else if (state === SESSION_ACTIVE) {
+        this.hardwareDegraded = false;
+        this.hardwareConnected = true;
+        if (!hardwareAdapter.timer) {
+          hardwareAdapter.start();
+        }
+      } else if (state === SESSION_DISCONNECTED) {
+        this.hardwareDegraded = false;
+        this.hardwareConnected = false;
+      }
+      this.refreshHardwareUi();
+    };
+    hardwareSessionManager.onFatal = (message) => {
+      this.handleFatalDisconnect(message).catch(() => {});
+    };
+    hardwareSessionManager.transport.onLinkLoss = () => hardwareSessionManager._handleLinkLoss();
+
+    try {
+      if (this.transportKind === TRANSPORT_WEB_SERIAL) {
+        await activeTransport.connect();
+      } else {
+        await activeTransport.connect();
+      }
+      const status = await hardwareSessionManager.startSession(this.moduleKey);
+      this.hardwareConnected = true;
+      this.hardwareDegraded = false;
+      hardwareAdapter.start();
+      this.refreshHardwareUi();
+      syncBindingsToScheduler();
+      await rebuildAudioIfRunning();
+      const transportLabel = this.transportKind === TRANSPORT_WEB_SERIAL ? 'Web Serial' : 'bridge';
+      ui.status.textContent = `Hardware connected via ${transportLabel} (${status.firmwareModuleKind ?? this.moduleKey})`;
+    } catch (err) {
+      await hardwareSessionManager?.disconnect().catch(() => {});
+      hardwareSessionManager = null;
       this.updateHardwareStatus();
-      ui.status.textContent =
-        `Module mismatch: slot is ${this.moduleKey}, device is ${status.firmwareModuleKind}`;
+      throw err;
+    }
+  }
+
+  async reconnectHardware() {
+    if (!this.hardwareDesignated || !this.hardwareDegraded) {
       return;
     }
+    if (!hardwareSessionManager) {
+      hardwareSessionManager = createSessionManager();
+    }
+    const status = await hardwareSessionManager.operatorReconnect(this.moduleKey);
+    this.hardwareDegraded = false;
     this.hardwareConnected = true;
-    hardwareAdapter.start();
+    if (!hardwareAdapter.timer) {
+      hardwareAdapter.start();
+    }
+    this.refreshHardwareUi();
+    ui.status.textContent = `Hardware reconnected (${status.firmwareModuleKind ?? this.moduleKey})`;
+  }
+
+  async handleFatalDisconnect(message) {
+    hardwareAdapter.stop();
+    if (hardwareSessionManager) {
+      await hardwareSessionManager.disconnect().catch(() => {});
+      hardwareSessionManager = null;
+    }
+    this.hardwareConnected = false;
+    this.hardwareDegraded = false;
     this.refreshHardwareUi();
     syncBindingsToScheduler();
-    await rebuildAudioIfRunning();
-    ui.status.textContent = `Hardware connected (${status.firmwareModuleKind ?? this.moduleKey})`;
+    ui.status.textContent = message;
   }
 
   async disconnectHardware() {
-    if (!this.hardwareConnected) {
+    if (!this.hardwareConnected && !this.hardwareDegraded) {
       return;
     }
     hardwareAdapter.stop();
-    await bridgeClient.stopSession();
+    if (hardwareSessionManager) {
+      hardwareSessionManager.cancelAutoRetry();
+      await hardwareSessionManager.stopSession().catch(() => {});
+      await hardwareSessionManager.disconnect().catch(() => {});
+      hardwareSessionManager = null;
+    } else {
+      await activeTransport.stopSession().catch(() => {});
+      await activeTransport.disconnect().catch(() => {});
+    }
     this.hardwareConnected = false;
+    this.hardwareDegraded = false;
     this.refreshHardwareUi();
     syncBindingsToScheduler();
     await rebuildAudioIfRunning();

@@ -16,15 +16,16 @@ const PIPELINE_SPIKE_RTT_FACTOR = 1.5;
 const RTT_SAMPLE_CAP = 120;
 
 /**
- * Async hardware slot: ring buffers between chain scheduler and bridge relay worker.
+ * Async hardware slot: ring buffers between chain scheduler and transport relay worker.
  * Phase 3: depth-3 default, adaptive depth-4, pipelined exchanges, recovery stats.
+ * Phase 4: shared transport interface (bridge WebSocket or Web Serial direct).
  */
 export class HardwareSlotAdapter {
   /**
-   * @param {import('./bridge-client.js').BridgeClient} bridgeClient
+   * @param {import('./hardware-transport.js').HardwareTransport} transport
    */
-  constructor(bridgeClient) {
-    this.bridge = bridgeClient;
+  constructor(transport) {
+    this.transport = transport;
     this.sequence = 0;
     this.connected = false;
     this.transientUnderrun = false;
@@ -221,7 +222,10 @@ export class HardwareSlotAdapter {
       this.fatalError = `sequence gap at ${sequence}`;
       this.onFatal(this.fatalError);
       this.stop();
-      this.bridge.stopSession().catch(() => {});
+      this.transport.stopSession().catch(() => {});
+      if (this.transport.markFatal) {
+        this.transport.markFatal(this.fatalError);
+      }
     }
   }
 
@@ -234,7 +238,7 @@ export class HardwareSlotAdapter {
         downstreamIn: outbound.downstreamIn,
         upstreamIn: outbound.upstreamIn,
       });
-      const responseBuf = await this.bridge.relayExchange(request, seq);
+      const responseBuf = await this.transport.relayExchange(request, seq);
       const wire = new Uint8Array(responseBuf);
       const inner = wire.subarray(4);
       const parsed = parseExchangeResponse(inner);
@@ -267,7 +271,7 @@ export class HardwareSlotAdapter {
   }
 
   async _tickExchange() {
-    if (!this.connected || !this.bridge.sessionActive || this.fatalError) {
+    if (!this.connected || !this.transport.sessionActive || this.fatalError) {
       return;
     }
 

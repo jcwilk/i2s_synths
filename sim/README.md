@@ -86,13 +86,13 @@ Default bridge WebSocket URL in the gateway card: `ws://localhost:8765`. See [`h
 4. **Delete unit**: remove a card via × in the header. Disabled on the sole remaining unit while audio is running; when stopped, you may delete down to zero units.
 5. **Reorder units**: drag a unit card by its handle to a new position among other unit cards. The gateway card stays fixed. Sliders and selectors do not initiate reorder.
 6. **Loopback** (rightmost unit only): when enabled, that unit's upstream input receives its prior downstream output; default off.
-7. **Hardware slot** (Phase 2): mark one unit as hardware, match module type to flashed firmware, start bridge, Connect. Physical device pots apply when connected; WASM sliders hidden.
+7. **Hardware slot** (Phase 2–4): mark one unit as hardware, match module type to flashed firmware, pick transport (bridge or Web Serial), Connect. Physical device pots apply when connected; WASM sliders hidden. See [`HARDWARE_OPERATOR.md`](HARDWARE_OPERATOR.md).
 
 Initial load includes gateway plus one delay unit.
 
 ## Structural reconfiguration and audio rebuild
 
-These operator actions are **structural reconfiguration**: add unit, delete unit, reorder units, change module type, toggle loopback on the rightmost unit, **designate/clear hardware mode**, **connect/disconnect hardware session**. When audio is **running**, each structural edit briefly stops output, clears level histories and playback buffers, re-syncs the chain scheduler (including path delay state), and **auto-restarts** audio while preserving the microphone toggle and pot slider positions. The status line shows “Restarting audio…” during rebuild; failures surface there with a prompt to tap Start again.
+These operator actions are **structural reconfiguration**: add unit, delete unit, reorder units, change module type, toggle loopback on the rightmost unit, **designate/clear hardware mode**, **connect/disconnect hardware session**. **Transport reconnect after link loss is not structural reconfiguration** — chain layout is preserved and audio does not rebuild solely for reconnect. When audio is **running**, each structural edit briefly stops output, clears level histories and playback buffers, re-syncs the chain scheduler (including path delay state), and **auto-restarts** audio while preserving the microphone toggle and pot slider positions. The status line shows “Restarting audio…” during rebuild; failures surface there with a prompt to tap Start again.
 
 **Pot slider** moves on WASM units are **not** structural. **Physical pot** movement on a connected hardware device is **not** structural. Disconnect hardware before reordering units.
 
@@ -192,13 +192,15 @@ Minimum **10 minutes** per scenario with connected board. Headless bridge relay:
 |------|------------------|-------|
 | Startup mute | Not modeled (~1 s silence on device boot) | — |
 | Render quantum | Web Audio 128-frame quantum vs 128-sample firmware buffer | See `host/AUDIOWORKLET_CPU.md` |
-| Hardware slots | Single slot only | Phase 4+ |
+| Hardware slots | Single slot only | — |
 | USB latency | Published budget + tolerance; recovery badges on hardware card | Phase 3 hardening |
-| Web Serial | Not available | Phase 4 |
+| Web Serial | Chrome/Edge direct transport; bridge fallback on other browsers | See [`HARDWARE_OPERATOR.md`](HARDWARE_OPERATOR.md) |
+| Reconnect | Degraded state + operator reconnect; auto-retry 3× / 2 s | No browser restart |
+| Port exclusivity | Bridge vs Web Serial vs upload tools | [`HARDWARE_OPERATOR.md`](HARDWARE_OPERATOR.md#port-busy--conflicts) |
 | Undo/redo | Delete and reorder are immediate | Future UX |
 | Gateway module | I/O shim only | Optional |
 
-**Hardware integration deltas (known vs all-WASM):** added USB and bridge round-trip latency, async ring pipeline (3–4 periods), published mixed-chain latency budget and ±1 period tolerance, single hardware slot limit, physical-pot authoritative control with optional telemetry display.
+**Hardware integration deltas (known vs all-WASM):** added USB and transport round-trip latency (bridge adds relay hop; Web Serial is USB-only), async ring pipeline (3–4 periods), published mixed-chain latency budget and ±1 period tolerance, single hardware slot limit, physical-pot authoritative control with optional telemetry display, reconnect without chain rebuild, port exclusivity between transports and upload tools. **Operator guide:** [`HARDWARE_OPERATOR.md`](HARDWARE_OPERATOR.md).
 
 Merger cross-path timing uses decoupled per-path delay state in the chain host (Phase 2 parity). Merger and hardware unit cards show **Underrun** / **Overrun** / **Sustained drop risk** badges per recovery policy.
 
